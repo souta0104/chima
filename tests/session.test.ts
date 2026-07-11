@@ -93,6 +93,24 @@ describe("session record", () => {
       fixture,
     );
   });
+
+  it("stdin の読み取りに失敗しても CLI は exit 0 で終わる", async () => {
+    async function* brokenStdin(): AsyncGenerator<string> {
+      throw new Error("stdin failed");
+    }
+
+    await expect(
+      runCli(
+        ["node", "chima", "session", "record"],
+        {},
+        {
+          stdin: brokenStdin(),
+          writeStdout: vi.fn(),
+          writeStderr: vi.fn(),
+        },
+      ),
+    ).resolves.toBe(0);
+  });
 });
 
 async function makeTemporaryHome(): Promise<string> {

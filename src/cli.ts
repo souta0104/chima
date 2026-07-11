@@ -1,6 +1,8 @@
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { completeCheckpoint } from "./commands/checkpoint.js";
+import { guard, stopGate } from "./commands/guard.js";
 import { runLinearCommand } from "./commands/linear.js";
 import { recordSession } from "./commands/session.js";
 import { formatStatusText, getStatus } from "./commands/status.js";
@@ -58,8 +60,37 @@ export async function runCli(
   }
 
   if (command === "session" && argv[3] === "record" && argv.length === 4) {
-    const input = await readStdin(io.stdin);
+    const input = await readStdinSafely(io.stdin);
+    if (input === null) {
+      return 0;
+    }
     io.writeStdout(await recordSession(input, env));
+    return 0;
+  }
+
+  if (
+    command === "guard" &&
+    (argv.length === 3 || (argv.length === 4 && argv[3] === "--stop-gate"))
+  ) {
+    const input = await readStdinSafely(io.stdin);
+    if (input === null) {
+      return 0;
+    }
+    const output =
+      argv[3] === "--stop-gate"
+        ? await stopGate(input, env)
+        : await guard(input, env);
+    io.writeStdout(output);
+    return 0;
+  }
+
+  if (
+    command === "checkpoint" &&
+    argv[3] === "done" &&
+    argv[4] !== undefined &&
+    argv.length === 5
+  ) {
+    await completeCheckpoint(argv[4], env);
     return 0;
   }
 
@@ -83,6 +114,16 @@ export async function runCli(
 
   io.writeStderr(`${usage()}\n`);
   return 1;
+}
+
+async function readStdinSafely(
+  stdin: CliIo["stdin"],
+): Promise<string | null> {
+  try {
+    return await readStdin(stdin);
+  } catch {
+    return null;
+  }
 }
 
 if (
