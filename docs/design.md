@@ -300,6 +300,25 @@ connectors/claude-code/skills/worker-run/SKILL.md に定義する。chima の頭
   フロー情報 (意思決定ログ・悩み・論点・作業依頼) はコメントに書く
 - Linear の読み書きはすべて chima CLI (Bot 名義) で行う
 
+#### Linear 可視化規約
+
+Linear を見ただけで「今誰が何をすべきか」が分かる状態を常に保つ。
+
+- assignee はボールを持っている人を表す。人間の対応が必要な作業は、コメント
+  本文だけの依頼で終わらせず、必ず人間 assignee のイシューとして存在させる
+- status の運用は以下に統一する:
+  - Backlog: blocker により着手不可
+  - Todo: 着手可能
+  - In Progress (AI・Human): 実作業中。担当が AI か人間かで区別する
+  - In Review 系 (プロジェクトに存在する場合): レビュー待ち
+  - Done: 完了
+- 親イシュー description の冒頭に `## Now (毎サイクル更新)` ブロックを置き、
+  「人間: ...」「AI: ...」の現在アクションを記載する。このブロックは収束
+  プロトコルのたびに更新する
+- PR は Draft = AI 作業中の印として作成する。AI の実装と独立レビューが完了して
+  人間のレビュー待ちに渡すタイミングで Ready for review に変更する (`gh pr
+  ready`)。イシューを In Human Review にするのと同時に行う
+
 ### 5. 人間への依頼
 
 - policy.delegate_to_human に該当する操作、承認プロンプト待ちで進行不能になった
@@ -326,8 +345,10 @@ connectors/claude-code/skills/worker-run/SKILL.md に定義する。chima の頭
    - 次のアクション (次セッションが最初にやるべきこと)
    - 対応したコメント一覧 (返信リンク)
 5. description に確定事項を反映
-6. `chima checkpoint done <project>` を実行
-7. 応答を終了する (tmux の後始末は次の tick がやる)
+6. `## Now (毎サイクル更新)` ブロックと各イシューの status / assignee を、
+   実際のボールの所在に合わせて更新する
+7. `chima checkpoint done <project>` を実行
+8. 応答を終了する (tmux の後始末は次の tick がやる)
 
 「現状を示し切る」ことが成果物。無理にタスク完成を目指さない。
 Linear が不通なら、チェックポイント本文を state/pending/<name>.md に保存して
