@@ -55,7 +55,9 @@ Claude Code のセッションはコンテキストが 40% を超えたあたり
   - `context_window.total_input_tokens`, `context_window.context_window_size`
   - `cost.total_duration_ms` (セッション開始からの経過ミリ秒), `cost.total_cost_usd`
   - `session_id`
-  → 使用量検知の一次情報源は statusline。これが最も正確で公式な入口
+  → 使用量検知の一次情報源は statusline。これが最も正確で公式な入口。
+    ただし chima の成立条件にはせず、statusline 未導入環境では時間ベース判定
+    のみで動作する
 - hook (PreToolUse / PostToolUse / Stop / SessionStart 等) の stdin には context
   使用量は入らない (docs/en/hooks.md)。session_id と transcript_path は入る。
   transcript JSONL のパースは「バージョン間で形式が変わる」と明記された非公式手段
@@ -92,6 +94,13 @@ worker-run skill  → ワーカーの行動規範 (Linear 運用プロトコル 
 将来の web console は `chima status --json` と state/ の JSON を読むだけで作れる。
 そのために state は人間可読な素の JSON に保ち、CLI にすべてのロジックを寄せる
 (AI ツールへの依存を connector 層に閉じ込める)。
+
+statusline 連携は任意の強化部品と位置づける。context 使用率を Claude Code が渡す
+公式の口は statusline の stdin だけのため、40% 検知にはこの連携が必要になるが、
+chima 自体は statusline なしでも成立する。guard の収束判定は session state が
+無い・古い場合、経過時間 (work_budget_min) のみで行い、context 閾値判定は
+スキップする。結合は state ファイルの片方向のみで、statusline 側は書くだけ、
+guard 側は読むだけとし、互いの存在を前提にしない。
 
 ## リポジトリ構成 (新規 repo `chima`)
 
