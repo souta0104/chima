@@ -109,7 +109,7 @@ chima/
                              # 既存の statusline 表示は一切変えない
     skills/worker-run/SKILL.md
     settings.snippet.json    # settings.json に追記する hooks 設定の見本
-  launchd/com.souta0104.chima.tick.plist   # StartInterval 120 で chima tick
+  launchd/com.chima.tick.plist   # StartInterval 120 で chima tick
   config/projects.example.json
   install.sh                 # bin の symlink 配置、~/.chima 初期化、launchctl load、
                              # settings.json への hooks/statusline 追記ガイド表示
@@ -220,8 +220,8 @@ chima は人間の API key ではなく、Linear の OAuth Application を actor
 {
   "projects": [{
     "name": "magonote",
-    "repo": "/Users/sota-hagiwara/Documents/souta0104/magonote",
-    "parent_issue": "DEV-10",
+    "repo": "/path/to/your-project",
+    "parent_issue": "PROJ-10",
     "interval_min": 30,
     "work_budget_min": 20,
     "context_threshold_pct": 40,
@@ -371,7 +371,7 @@ Linear が不通なら、チェックポイント本文を state/pending/<name>.
 
 サブイシュー構成 (blocker は ← で表記):
 
-1. repo 雛形: `gh repo create souta0104/chima --private`、pnpm + TS + vitest 設定、
+1. repo 雛形: (自分のアカウントで) `gh repo create <owner>/chima --private`、pnpm + TS + vitest 設定、
    docs/design.md に本設計を清書して初回 commit
 2. Linear OAuth Application (actor=app) の作成・導入承認 (人間作業)。「人間への
    依頼」フローの初実践としてイシュー化し、Settings → API での作成手順・必要
