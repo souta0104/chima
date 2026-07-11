@@ -3,6 +3,7 @@ import { fileURLToPath } from "node:url";
 
 import { completeCheckpoint } from "./commands/checkpoint.js";
 import { guard, stopGate } from "./commands/guard.js";
+import { runLinearCommand } from "./commands/linear.js";
 import { recordSession } from "./commands/session.js";
 import { formatStatusText, getStatus } from "./commands/status.js";
 
@@ -105,6 +106,10 @@ export async function runCli(
       io.writeStdout(output.length === 0 ? "" : `${output}\n`);
     }
     return 0;
+  }
+
+  if (command === "linear") {
+    return runLinearCommand(argv.slice(3), env, io);
   }
 
   io.writeStderr(`${usage()}\n`);
