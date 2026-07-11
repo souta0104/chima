@@ -1,0 +1,24 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/path/to/chima/connectors/claude-code/hooks/context-guard.sh"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/path/to/chima/connectors/claude-code/hooks/stop-gate.sh"
+          }
+        ]
+      }
+    ]
+  }
+}
