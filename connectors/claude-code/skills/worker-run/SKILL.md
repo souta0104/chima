@@ -95,14 +95,25 @@ sonnet5 (このセッション自身) が指揮を執り、以下の特性に沿
 Linear を見ただけで「今誰が何をすべきか」が分かる状態を常に保つ。これを守らず
 コメント本文だけで依頼を済ませることは禁止する。
 
-- assignee はボールを持っている人を表す。人間の対応が必要な作業は、必ず人間
-  assignee のイシューとして存在させる。コメントに依頼を書いて終わりにしない
-- status は次の意味で統一して使う:
+- AI がボールを持つイシュー (In Progress (AI)) は delegate = Chima (app user)
+  にする。Linear の仕様上、app user は assignee フィールドに設定できず (MCP
+  save_issue / GraphQL issueUpdate のどちらで assigneeId に app user の ID を
+  渡しても assignee は変わらず delegate に入る)、delegate が公式の「エージェ
+  ントに任せる」表現のためこれを用いる (2026-07-12 確定)
+- 人間がボールを持つイシューは assignee = 人間、delegate なし。人間の対応が
+  必要な作業は、必ず人間 assignee のイシューとして存在させる。コメントに依頼
+  を書いて終わりにしない
+- 未着手・ブロック中 (Todo / Backlog) は assignee・delegate ともになし
+- status は次の意味で統一して使う (2026-07-11 確定):
   - Backlog: blocker により着手不可
-  - Todo: 着手可能
-  - In Progress (AI・Human): 実作業中。担当が AI か人間かで区別する
-  - In Review 系 (プロジェクトに存在する場合): レビュー待ち
+  - Todo: 未着手 (着手可能)
+  - In Progress (AI): AI が作業中
+  - Waiting for Human Work: 人のアクション待ち (未着手)
+  - In Progress (Human): 人が作業中
+  - In Human Review: 人の確認・承認・マージ待ち
   - Done: 完了
+  - 人間ボールは Waiting for Human Work と In Human Review の 2 つに集約し、
+    人間はこの 2 status だけ見ればよい状態を保つ
 - 親イシュー description の冒頭に `## Now (毎サイクル更新)` ブロックを置き、
   「人間: ...」「AI: ...」で現在アクションを記載する。このブロックは収束
   プロトコルのたびに必ず更新する
