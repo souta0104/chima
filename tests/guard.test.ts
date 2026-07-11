@@ -37,7 +37,9 @@ describe("guard", () => {
     const home = await makeGuardHome();
     await writeSession(home, { used_pct: 1, duration_ms: 20 * 60 * 1000 });
 
-    await expect(guard(hookInput(), env(home))).resolves.not.toBe("");
+    await expect(
+      guard(hookInput(), env(home), at("2026-07-11T00:01:00.000Z")),
+    ).resolves.not.toBe("");
   });
 
   it("context 使用率と経過時間が両方とも閾値未満なら何も返さない", async () => {
@@ -56,7 +58,61 @@ describe("guard", () => {
       duration_ms: 20 * 60 * 1000,
     });
 
-    await expect(guard(hookInput(), env(home))).resolves.not.toBe("");
+    await expect(
+      guard(hookInput(), env(home), at("2026-07-11T00:01:00.000Z")),
+    ).resolves.not.toBe("");
+  });
+
+  it("session state がなくても lock の経過時間が予算以上なら収束指示を返す", async () => {
+    const home = await makeGuardHome();
+    await writeProjectState(home, {
+      lock: {
+        tmux_session: "chima-magonote",
+        started_at: "2026-07-11T00:00:00.000Z",
+      },
+    });
+
+    await expect(
+      guard(hookInput(), env(home), at("2026-07-11T00:20:00.000Z")),
+    ).resolves.not.toBe("");
+  });
+
+  it("duration_ms がなくても lock の経過時間が予算以上なら収束指示を返す", async () => {
+    const home = await makeGuardHome();
+    await writeSession(home, { used_pct: 1 });
+    await writeProjectState(home, {
+      lock: {
+        tmux_session: "chima-magonote",
+        started_at: "2026-07-11T00:00:00.000Z",
+      },
+    });
+
+    await expect(
+      guard(hookInput(), env(home), at("2026-07-11T00:20:00.000Z")),
+    ).resolves.not.toBe("");
+  });
+
+  it("session state と lock.started_at がなければ収束指示を返さない", async () => {
+    const home = await makeGuardHome();
+
+    await expect(
+      guard(hookInput(), env(home), at("2026-07-11T00:20:00.000Z")),
+    ).resolves.toBe("");
+  });
+
+  it("session state が古ければ lock の経過時間で判定する", async () => {
+    const home = await makeGuardHome();
+    await writeSession(home, { used_pct: 1, duration_ms: 1 });
+    await writeProjectState(home, {
+      lock: {
+        tmux_session: "chima-magonote",
+        started_at: "2026-07-11T00:00:00.000Z",
+      },
+    });
+
+    await expect(
+      guard(hookInput(), env(home), at("2026-07-11T00:20:00.000Z")),
+    ).resolves.not.toBe("");
   });
 
   it("初回と 2 分経過後だけ収束指示を返す", async () => {
@@ -140,6 +196,26 @@ describe("guard --stop-gate", () => {
     });
 
     await expect(stopGate(hookInput(), env(home))).resolves.not.toBe("");
+    await expect(stopGate(hookInput(), env(home))).resolves.toBe("");
+  });
+
+  it("古い checkpoint_done_at があれば新しい収束指示をブロックする", async () => {
+    const home = await makeGuardHome();
+    await writeProjectState(home, {
+      checkpoint_done_at: "2026-07-11T00:00:00.000Z",
+      wrapup_requested_at: "2026-07-11T01:00:00.000Z",
+    });
+
+    await expect(stopGate(hookInput(), env(home))).resolves.not.toBe("");
+  });
+
+  it("checkpoint_done_at が収束指示以降ならブロックしない", async () => {
+    const home = await makeGuardHome();
+    await writeProjectState(home, {
+      wrapup_requested_at: "2026-07-11T00:00:00.000Z",
+      checkpoint_done_at: "2026-07-11T00:00:00.000Z",
+    });
+
     await expect(stopGate(hookInput(), env(home))).resolves.toBe("");
   });
 });
