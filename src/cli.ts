@@ -3,9 +3,12 @@ import { fileURLToPath } from "node:url";
 
 import { completeCheckpoint } from "./commands/checkpoint.js";
 import { guard, stopGate } from "./commands/guard.js";
+import { kickProject } from "./commands/kick.js";
+import { launchProject } from "./commands/launch.js";
 import { runLinearCommand } from "./commands/linear.js";
 import { recordSession } from "./commands/session.js";
 import { formatStatusText, getStatus } from "./commands/status.js";
+import { tick } from "./commands/tick.js";
 
 const KNOWN_COMMANDS = [
   "tick",
@@ -22,7 +25,7 @@ function usage(): string {
   return [
     "usage: chima <command> [...args]",
     "",
-    "commands (planned):",
+    "commands:",
     ...KNOWN_COMMANDS.map((name) => `  ${name}`),
   ].join("\n");
 }
@@ -32,6 +35,22 @@ interface CliIo {
   writeStdout(value: string): void;
   writeStderr(value: string): void;
 }
+
+interface CliCommands {
+  tick(env: NodeJS.ProcessEnv): Promise<void>;
+  launch(project: string, env: NodeJS.ProcessEnv): Promise<void>;
+  kick(
+    project: string,
+    reason: string | undefined,
+    env: NodeJS.ProcessEnv,
+  ): Promise<void>;
+}
+
+const defaultCommands: CliCommands = {
+  tick: (env) => tick(env),
+  launch: (project, env) => launchProject(project, env),
+  kick: (project, reason, env) => kickProject(project, reason, env),
+};
 
 const processIo: CliIo = {
   stdin: process.stdin,
@@ -51,12 +70,28 @@ export async function runCli(
   argv: string[],
   env: NodeJS.ProcessEnv = process.env,
   io: CliIo = processIo,
+  commands: CliCommands = defaultCommands,
 ): Promise<number> {
   const command = argv[2];
 
   if (command === undefined || !KNOWN_COMMANDS.includes(command)) {
     io.writeStderr(`${usage()}\n`);
     return 1;
+  }
+
+  if (command === "tick" && argv.length === 3) {
+    return runCommand(() => commands.tick(env), io);
+  }
+
+  if (command === "launch" && argv[3] !== undefined && argv.length === 4) {
+    return runCommand(() => commands.launch(argv[3]!, env), io);
+  }
+
+  if (command === "kick" && argv[3] !== undefined) {
+    const reason = parseKickReason(argv.slice(4));
+    if (reason.valid) {
+      return runCommand(() => commands.kick(argv[3]!, reason.value, env), io);
+    }
   }
 
   if (command === "session" && argv[3] === "record" && argv.length === 4) {
@@ -114,6 +149,31 @@ export async function runCli(
 
   io.writeStderr(`${usage()}\n`);
   return 1;
+}
+
+async function runCommand(
+  command: () => Promise<void>,
+  io: CliIo,
+): Promise<number> {
+  try {
+    await command();
+    return 0;
+  } catch (error) {
+    io.writeStderr(`${error instanceof Error ? error.message : String(error)}\n`);
+    return 1;
+  }
+}
+
+function parseKickReason(args: string[]):
+  | { valid: true; value: string | undefined }
+  | { valid: false } {
+  if (args.length === 0) {
+    return { valid: true, value: undefined };
+  }
+  if (args.length === 2 && args[0] === "--reason" && args[1] !== undefined) {
+    return { valid: true, value: args[1] };
+  }
+  return { valid: false };
 }
 
 async function readStdinSafely(
