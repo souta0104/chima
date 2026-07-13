@@ -1,6 +1,3 @@
-import { resolve } from "node:path";
-import { fileURLToPath } from "node:url";
-
 import { completeCheckpoint } from "./commands/checkpoint.js";
 import { guard, stopGate } from "./commands/guard.js";
 import { kickProject } from "./commands/kick.js";
@@ -186,9 +183,13 @@ async function readStdinSafely(
   }
 }
 
-if (
-  process.argv[1] !== undefined &&
-  fileURLToPath(import.meta.url) === resolve(process.argv[1])
-) {
-  process.exitCode = await runCli(process.argv);
-}
+// cli.ts is only ever loaded via bin/chima's `import "../dist/cli.js"`
+// (see tests/*.test.ts, which import { runCli } directly instead of
+// executing this file), so the module can always run the CLI on load.
+// A "was this module executed directly" guard based on comparing
+// process.argv[1] to import.meta.url was removed here because it breaks
+// when bin/chima is invoked through a symlink (e.g. `~/.local/bin/chima`
+// installed by install.sh): process.argv[1] keeps the symlink path while
+// import.meta.url resolves to the physical dist/cli.js path, so the
+// comparison never matched and no subcommand ever ran.
+process.exitCode = await runCli(process.argv);
