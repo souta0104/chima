@@ -10,6 +10,9 @@ const TOKEN_ENDPOINT = "https://api.linear.app/oauth/token";
 const REDIRECT_URI = "http://localhost:8973/callback";
 const SCOPES = ["read", "write", "app:mentionable", "app:assignable"];
 
+// Linear の token endpoint が応答しない場合に tick 全体を無期限に止めないための上限。
+const REQUEST_TIMEOUT_MS = 30_000;
+
 export interface LinearCredentials {
   client_id?: unknown;
   client_secret?: unknown;
@@ -154,6 +157,7 @@ export async function refreshLinearToken(
       client_secret: clientSecret,
       grant_type: "refresh_token",
     }),
+    signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
   });
   const payload = (await response.json()) as Partial<TokenResponse> & {
     error?: unknown;
@@ -206,6 +210,7 @@ export async function authenticateLinear(
       grant_type: "authorization_code",
       actor: "app",
     }),
+    signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
   });
   const payload = (await response.json()) as Partial<TokenResponse> & {
     error?: unknown;

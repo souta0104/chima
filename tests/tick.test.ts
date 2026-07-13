@@ -277,6 +277,27 @@ describe("tick", () => {
 
     expect(dependencies.launch).toHaveBeenCalledWith("magonote");
   });
+
+  it("各ステージの開始・完了を順番にログする", async () => {
+    const home = await makeHome({
+      last_run: NOW.toISOString(),
+      lock: null,
+    });
+    const dependencies = mockDependencies(true);
+
+    await tick(env(home), dependencies);
+
+    expect(dependencies.logStage.mock.calls).toEqual([
+      ["config読込", "start"],
+      ["config読込", "done"],
+      ["Linearポーリング", "start"],
+      ["Linearポーリング", "done"],
+      ["lock管理", "start"],
+      ["lock管理", "done"],
+      ["due判定・launch", "start"],
+      ["due判定・launch", "done"],
+    ]);
+  });
 });
 
 async function makeHome(
@@ -307,6 +328,7 @@ function mockDependencies(sessionExists: boolean, issue: unknown = emptyIssue())
     getIssue: vi.fn(async (_id: string) => issue),
     launch: vi.fn(async () => undefined),
     kick: vi.fn(async () => undefined),
+    logStage: vi.fn(),
   };
 }
 

@@ -9,6 +9,9 @@ import {
 
 const GRAPHQL_ENDPOINT = "https://api.linear.app/graphql";
 
+// Linear API が応答しない場合に tick 全体を無期限に止めないための上限。
+const REQUEST_TIMEOUT_MS = 30_000;
+
 export const ISSUE_QUERY = `
   query Issue($id: String!) {
     issue(id: $id) {
@@ -150,6 +153,7 @@ export class LinearClient {
         "Content-Type": "application/json",
       },
       body: JSON.stringify({ query, variables }),
+      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
     });
 
     let payload: GraphqlResponse<T>;

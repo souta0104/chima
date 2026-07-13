@@ -47,6 +47,16 @@ export interface TickDependencies {
   getIssue(id: string): Promise<unknown>;
   launch(project: string): Promise<void>;
   kick(project: string, reason: string): Promise<void>;
+  logStage(stage: string, event: "start" | "done"): void;
+}
+
+// tick の各ステージの開始・完了を stderr に記録する。launchd 環境では
+// StandardErrorPath 経由で tick.log に落ちるため、実行がどのステージで
+// 止まったかを次回起動を待たずに特定できる (DEV-28 follow-up: tick ハング調査)。
+function defaultLogStage(stage: string, event: "start" | "done"): void {
+  process.stderr.write(
+    `[chima tick] ${new Date().toISOString()} ${stage} ${event}\n`,
+  );
 }
 
 export async function tick(
@@ -64,10 +74,15 @@ export async function tick(
     dependencies.kick ??
     ((project: string, reason: string) =>
       kickProject(project, reason, env, now, tmux));
+  const logStage = dependencies.logStage ?? defaultLogStage;
   const currentTime = now();
+
+  logStage("config読込", "start");
   const projects = await readProjectsConfig(env);
   const enabledProjects = projects.filter((project) => project.enabled);
+  logStage("config読込", "done");
 
+  logStage("Linearポーリング", "start");
   await detectEmergencies(
     enabledProjects,
     env,
@@ -76,8 +91,15 @@ export async function tick(
     launch,
     kick,
   );
+  logStage("Linearポーリング", "done");
+
+  logStage("lock管理", "start");
   await manageLocks(projects, env, currentTime, tmux, kick);
+  logStage("lock管理", "done");
+
+  logStage("due判定・launch", "start");
   await launchDueProjects(enabledProjects, env, currentTime, launch);
+  logStage("due判定・launch", "done");
 }
 
 export function isProjectDue(

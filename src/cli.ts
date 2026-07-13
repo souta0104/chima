@@ -7,6 +7,12 @@ import { recordSession } from "./commands/session.js";
 import { formatStatusText, getStatus } from "./commands/status.js";
 import { tick } from "./commands/tick.js";
 
+// tick が launchd の StartInterval (2分) を超えて動き続けると、次回起動と
+// 重なり続けてロックが解消されなくなる。tick は本来数秒で終わるべき処理
+// なので、90 秒を上限として強制終了し、次回 tick でのハング調査手がかりを
+// 残す (DEV-28 follow-up: tick ハング調査)。
+const TICK_WATCHDOG_TIMEOUT_MS = 90_000;
+
 const KNOWN_COMMANDS = [
   "tick",
   "launch",
@@ -31,6 +37,11 @@ interface CliIo {
   stdin: AsyncIterable<string | Uint8Array>;
   writeStdout(value: string): void;
   writeStderr(value: string): void;
+  // watchdog タイムアウト時にプロセスを強制終了するためのフック。
+  // ハングした fetch 等がイベントループを掴んだままだと exitCode の設定だけ
+  // ではプロセスが終了しないため、テストでは差し替え可能にした上で
+  // 本番実装では process.exit を呼ぶ。
+  exit(code: number): void;
 }
 
 interface CliCommands {
@@ -53,6 +64,7 @@ const processIo: CliIo = {
   stdin: process.stdin,
   writeStdout: (value) => process.stdout.write(value),
   writeStderr: (value) => process.stderr.write(value),
+  exit: (code) => process.exit(code),
 };
 
 async function readStdin(stdin: CliIo["stdin"]): Promise<string> {
@@ -77,7 +89,11 @@ export async function runCli(
   }
 
   if (command === "tick" && argv.length === 3) {
-    return runCommand(() => commands.tick(env), io);
+    return runCommandWithWatchdog(
+      () => commands.tick(env),
+      io,
+      TICK_WATCHDOG_TIMEOUT_MS,
+    );
   }
 
   if (command === "launch" && argv[3] !== undefined && argv.length === 4) {
@@ -159,6 +175,33 @@ async function runCommand(
     io.writeStderr(`${error instanceof Error ? error.message : String(error)}\n`);
     return 1;
   }
+}
+
+// command が timeoutMs 以内に終わらなければ異常ログを出して強制終了する。
+// 元の Promise (ハングした fetch 等) 自体は Node.js の制約上キャンセルできず、
+// イベントループを掴んだままになり得るため exitCode の設定だけでは
+// プロセスが終了しない。io.exit で明示的にプロセスを終了させ、次回 tick が
+// 新しいプロセスとして正常に起動できる状態を優先する。
+async function runCommandWithWatchdog(
+  command: () => Promise<void>,
+  io: CliIo,
+  timeoutMs: number,
+): Promise<number> {
+  const timeout = new Promise<"timeout">((resolve) => {
+    setTimeout(() => resolve("timeout"), timeoutMs).unref();
+  });
+
+  const result = await Promise.race([runCommand(command, io), timeout]);
+
+  if (result === "timeout") {
+    io.writeStderr(
+      `[chima tick] ${new Date().toISOString()} watchdog timeout after ${timeoutMs}ms\n`,
+    );
+    io.exit(1);
+    return 1;
+  }
+
+  return result;
 }
 
 function parseKickReason(args: string[]):
