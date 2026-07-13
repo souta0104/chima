@@ -14,6 +14,9 @@ export interface LinearCredentials {
   client_id?: unknown;
   client_secret?: unknown;
   access_token?: unknown;
+  refresh_token?: unknown;
+  obtained_at?: unknown;
+  expires_in?: unknown;
   [key: string]: unknown;
 }
 
@@ -92,6 +95,83 @@ export async function saveLinearToken(
     mode: 0o600,
   });
   await chmod(path, 0o600);
+}
+
+// Refresh proactively once less than this much of the token's lifetime
+// remains, so a request started just before expiry doesn't race the
+// server-side expiry check.
+const REFRESH_MARGIN_MS = 5 * 60 * 1000;
+
+export function isTokenExpiredOrExpiringSoon(
+  credentials: LinearCredentials,
+  now: () => Date = () => new Date(),
+): boolean {
+  const obtainedAt =
+    typeof credentials.obtained_at === "string"
+      ? Date.parse(credentials.obtained_at)
+      : NaN;
+  const expiresIn =
+    typeof credentials.expires_in === "number" ? credentials.expires_in : NaN;
+
+  if (!Number.isFinite(obtainedAt) || !Number.isFinite(expiresIn)) {
+    // No expiry information recorded: treat as not expired rather than
+    // forcing an unnecessary refresh (or refusing to make requests) when
+    // the field is simply absent (e.g. credentials written before this
+    // feature existed).
+    return false;
+  }
+
+  const expiresAt = obtainedAt + expiresIn * 1000;
+  return now().getTime() >= expiresAt - REFRESH_MARGIN_MS;
+}
+
+export async function refreshLinearToken(
+  env: NodeJS.ProcessEnv = process.env,
+  fetchImplementation: FetchImplementation = fetch,
+  now: () => Date = () => new Date(),
+): Promise<LinearCredentials> {
+  const path = getCredentialsPath(env);
+  const credentials = await readJsonFile<LinearCredentials>(path);
+
+  if (
+    credentials === null ||
+    typeof credentials.refresh_token !== "string" ||
+    credentials.refresh_token.length === 0
+  ) {
+    throw new Error(
+      "credentials.json に refresh_token がありません。chima linear auth を実行してください",
+    );
+  }
+
+  const { clientId, clientSecret } = await readOAuthClientCredentials(env);
+
+  const response = await fetchImplementation(TOKEN_ENDPOINT, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
+      refresh_token: credentials.refresh_token,
+      client_id: clientId,
+      client_secret: clientSecret,
+      grant_type: "refresh_token",
+    }),
+  });
+  const payload = (await response.json()) as Partial<TokenResponse> & {
+    error?: unknown;
+    error_description?: unknown;
+  };
+
+  if (!response.ok) {
+    const detail =
+      typeof payload.error_description === "string"
+        ? payload.error_description
+        : typeof payload.error === "string"
+          ? payload.error
+          : `HTTP ${response.status}`;
+    throw new Error(`Linear access_token のリフレッシュに失敗しました: ${detail}`);
+  }
+
+  await saveLinearToken(payload as TokenResponse, env, now);
+  return (await readJsonFile<LinearCredentials>(path)) ?? {};
 }
 
 export async function authenticateLinear(
