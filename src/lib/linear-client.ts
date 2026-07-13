@@ -2,7 +2,9 @@ import { readJsonFile } from "./state.js";
 import {
   type FetchImplementation,
   getCredentialsPath,
+  isTokenExpiredOrExpiringSoon,
   type LinearCredentials,
+  refreshLinearToken,
 } from "./linear-auth.js";
 
 const GRAPHQL_ENDPOINT = "https://api.linear.app/graphql";
@@ -139,16 +141,7 @@ export class LinearClient {
     query: string,
     variables: Record<string, unknown>,
   ): Promise<T> {
-    const credentials = await readJsonFile<LinearCredentials>(
-      getCredentialsPath(this.env),
-    );
-    const accessToken = credentials?.access_token;
-
-    if (typeof accessToken !== "string" || accessToken.length === 0) {
-      throw new Error(
-        "credentials.json に access_token がありません。chima linear auth を実行してください",
-      );
-    }
+    const accessToken = await this.getAccessToken();
 
     const response = await this.fetchImplementation(GRAPHQL_ENDPOINT, {
       method: "POST",
@@ -184,6 +177,30 @@ export class LinearClient {
     }
 
     return payload.data;
+  }
+
+  private async getAccessToken(): Promise<string> {
+    const credentialsPath = getCredentialsPath(this.env);
+    let credentials = await readJsonFile<LinearCredentials>(credentialsPath);
+
+    if (credentials === null) {
+      throw new Error(
+        "credentials.json に access_token がありません。chima linear auth を実行してください",
+      );
+    }
+
+    if (isTokenExpiredOrExpiringSoon(credentials)) {
+      credentials = await refreshLinearToken(this.env, this.fetchImplementation);
+    }
+
+    const accessToken = credentials.access_token;
+    if (typeof accessToken !== "string" || accessToken.length === 0) {
+      throw new Error(
+        "credentials.json に access_token がありません。chima linear auth を実行してください",
+      );
+    }
+
+    return accessToken;
   }
 
   async getIssue(id: string): Promise<unknown> {

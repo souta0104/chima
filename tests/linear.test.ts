@@ -14,7 +14,11 @@ import {
   ISSUE_UPDATE_MUTATION,
   LinearClient,
 } from "../src/lib/linear-client.js";
-import { saveLinearToken } from "../src/lib/linear-auth.js";
+import {
+  isTokenExpiredOrExpiringSoon,
+  refreshLinearToken,
+  saveLinearToken,
+} from "../src/lib/linear-auth.js";
 
 const temporaryDirectories: string[] = [];
 
@@ -164,6 +168,151 @@ describe("Linear credentials", () => {
       )}\n`,
     );
     expect((await stat(credentialsPath)).mode & 0o777).toBe(0o600);
+  });
+
+  it("obtained_at / expires_in がなければ期限切れ扱いにしない", () => {
+    expect(isTokenExpiredOrExpiringSoon({})).toBe(false);
+  });
+
+  it("期限内であれば期限切れ扱いにしない", () => {
+    const credentials = {
+      obtained_at: "2026-07-11T00:00:00.000Z",
+      expires_in: 86_400,
+    };
+    const now = () => new Date("2026-07-11T01:00:00.000Z");
+    expect(isTokenExpiredOrExpiringSoon(credentials, now)).toBe(false);
+  });
+
+  it("期限切れであれば true を返す", () => {
+    const credentials = {
+      obtained_at: "2026-07-11T00:00:00.000Z",
+      expires_in: 86_400,
+    };
+    const now = () => new Date("2026-07-12T00:00:01.000Z");
+    expect(isTokenExpiredOrExpiringSoon(credentials, now)).toBe(true);
+  });
+
+  it("期限間近 (5分未満) であれば true を返す", () => {
+    const credentials = {
+      obtained_at: "2026-07-11T00:00:00.000Z",
+      expires_in: 3600,
+    };
+    // 3600秒 (1時間) 中、残り4分59秒の時点
+    const now = () => new Date("2026-07-11T00:55:01.000Z");
+    expect(isTokenExpiredOrExpiringSoon(credentials, now)).toBe(true);
+  });
+
+  it("refresh_token で新しい access_token を取得し保存する", async () => {
+    const home = await makeTemporaryHome();
+    const credentialsPath = join(home, "config", "credentials.json");
+    await mkdir(join(home, "config"), { recursive: true });
+    await writeFile(
+      credentialsPath,
+      JSON.stringify({
+        client_id: "dummy-client-id",
+        client_secret: "dummy-client-secret",
+        access_token: "old-access-token",
+        refresh_token: "dummy-refresh-token",
+        obtained_at: "2026-07-11T00:00:00.000Z",
+        expires_in: 1,
+      }),
+      "utf8",
+    );
+
+    const fetchMock = vi.fn(async () =>
+      new Response(
+        JSON.stringify({
+          access_token: "new-access-token",
+          refresh_token: "new-refresh-token",
+          token_type: "Bearer",
+          expires_in: 86_399,
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      ),
+    ) as unknown as typeof fetch;
+
+    const credentials = await refreshLinearToken(
+      { CHIMA_HOME: home },
+      fetchMock,
+      () => new Date("2026-07-12T00:00:00.000Z"),
+    );
+
+    expect(credentials.access_token).toBe("new-access-token");
+    expect(credentials.refresh_token).toBe("new-refresh-token");
+    // client_id / client_secret must survive the refresh, since they are
+    // needed for any future refresh as well.
+    expect(credentials.client_id).toBe("dummy-client-id");
+
+    expect(fetchMock).toHaveBeenCalledOnce();
+    const [url, init] = vi.mocked(fetchMock).mock.calls[0]!;
+    expect(url).toBe("https://api.linear.app/oauth/token");
+    const body = new URLSearchParams(String(init?.body));
+    expect(body.get("grant_type")).toBe("refresh_token");
+    expect(body.get("refresh_token")).toBe("dummy-refresh-token");
+  });
+
+  it("refresh_token がなければエラーになる", async () => {
+    const home = await makeTemporaryHome();
+    await mkdir(join(home, "config"), { recursive: true });
+    await writeFile(
+      join(home, "config", "credentials.json"),
+      JSON.stringify({
+        client_id: "dummy-client-id",
+        client_secret: "dummy-client-secret",
+        access_token: "old-access-token",
+      }),
+      "utf8",
+    );
+
+    await expect(
+      refreshLinearToken({ CHIMA_HOME: home }, mockFetch({})),
+    ).rejects.toThrow("credentials.json に refresh_token がありません");
+  });
+
+  it("LinearClient が期限切れの access_token を自動でリフレッシュしてからリクエストする", async () => {
+    const home = await makeTemporaryHome();
+    await mkdir(join(home, "config"), { recursive: true });
+    await writeFile(
+      join(home, "config", "credentials.json"),
+      JSON.stringify({
+        client_id: "dummy-client-id",
+        client_secret: "dummy-client-secret",
+        access_token: "old-access-token",
+        refresh_token: "dummy-refresh-token",
+        obtained_at: "2026-07-11T00:00:00.000Z",
+        expires_in: 1,
+      }),
+      "utf8",
+    );
+
+    const issue = { id: "issue-id", identifier: "DEV-26" };
+    let call = 0;
+    const fetchMock = vi.fn(async (url: string | URL) => {
+      call += 1;
+      if (call === 1) {
+        expect(String(url)).toBe("https://api.linear.app/oauth/token");
+        return new Response(
+          JSON.stringify({
+            access_token: "refreshed-access-token",
+            expires_in: 86_399,
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        );
+      }
+      return new Response(JSON.stringify({ data: { issue } }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    }) as unknown as typeof fetch;
+
+    const client = new LinearClient({ CHIMA_HOME: home }, fetchMock);
+    await expect(client.getIssue("DEV-26")).resolves.toEqual(issue);
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    const [, secondInit] = vi.mocked(fetchMock).mock.calls[1]!;
+    expect(secondInit).toMatchObject({
+      headers: { Authorization: "Bearer refreshed-access-token" },
+    });
   });
 });
 
