@@ -47,15 +47,22 @@ export interface TickDependencies {
   getIssue(id: string): Promise<unknown>;
   launch(project: string): Promise<void>;
   kick(project: string, reason: string): Promise<void>;
-  logStage(stage: string, event: "start" | "done"): void;
+  logStage(stage: string, project: string | null, event: "start" | "done"): void;
 }
 
 // tick の各ステージの開始・完了を stderr に記録する。launchd 環境では
-// StandardErrorPath 経由で tick.log に落ちるため、実行がどのステージで
-// 止まったかを次回起動を待たずに特定できる (DEV-28 follow-up: tick ハング調査)。
-function defaultLogStage(stage: string, event: "start" | "done"): void {
+// StandardErrorPath 経由で tick.log に落ちるため、実行がどのステージ・
+// どのプロジェクトの処理で止まったかを次回起動を待たずに特定できる
+// (DEV-30 follow-up: tick ハング調査)。project は「config読込」のように
+// プロジェクトに紐付かないステージでは null。
+function defaultLogStage(
+  stage: string,
+  project: string | null,
+  event: "start" | "done",
+): void {
+  const projectPart = project === null ? "" : ` project=${project}`;
   process.stderr.write(
-    `[chima tick] ${new Date().toISOString()} ${stage} ${event}\n`,
+    `[chima tick] ${new Date().toISOString()} ${stage}${projectPart} ${event}\n`,
   );
 }
 
@@ -77,12 +84,11 @@ export async function tick(
   const logStage = dependencies.logStage ?? defaultLogStage;
   const currentTime = now();
 
-  logStage("config読込", "start");
+  logStage("config読込", null, "start");
   const projects = await readProjectsConfig(env);
   const enabledProjects = projects.filter((project) => project.enabled);
-  logStage("config読込", "done");
+  logStage("config読込", null, "done");
 
-  logStage("Linearポーリング", "start");
   await detectEmergencies(
     enabledProjects,
     env,
@@ -90,16 +96,14 @@ export async function tick(
     getIssue,
     launch,
     kick,
+    logStage,
   );
-  logStage("Linearポーリング", "done");
 
-  logStage("lock管理", "start");
-  await manageLocks(projects, env, currentTime, tmux, kick);
-  logStage("lock管理", "done");
+  await manageLocks(projects, env, currentTime, tmux, kick, logStage);
 
-  logStage("due判定・launch", "start");
-  await launchDueProjects(enabledProjects, env, currentTime, launch);
-  logStage("due判定・launch", "done");
+  logStage("due判定・launch", null, "start");
+  await launchDueProjects(enabledProjects, env, currentTime, launch, logStage);
+  logStage("due判定・launch", null, "done");
 }
 
 export function isProjectDue(
@@ -208,10 +212,17 @@ async function detectEmergencies(
   getIssue: (id: string) => Promise<unknown>,
   launch: (project: string) => Promise<void>,
   kick: (project: string, reason: string) => Promise<void>,
+  logStage: TickDependencies["logStage"],
 ): Promise<void> {
   for (const project of projects) {
+    logStage("emergency-check", project.name, "start");
+
     const state = await readProjectState(project.name, env);
+
+    logStage("emergency-check.fetch-comments", project.name, "start");
     const comments = await getProjectComments(project.parent_issue, getIssue);
+    logStage("emergency-check.fetch-comments", project.name, "done");
+
     const emergencies = findEmergencyComments(
       comments,
       state.last_seen_comment_at,
@@ -223,6 +234,7 @@ async function detectEmergencies(
 
     if (emergencies.length === 0) {
       await writeProjectState(project.name, nextState, env);
+      logStage("emergency-check", project.name, "done");
       continue;
     }
 
@@ -230,7 +242,9 @@ async function detectEmergencies(
       b.timestamp.localeCompare(a.timestamp),
     )[0]!;
     if (state.lock != null) {
+      logStage("emergency-check.kick", project.name, "start");
       await kick(project.name, latest.url);
+      logStage("emergency-check.kick", project.name, "done");
       const kickedState = await readProjectState(project.name, env);
       await writeProjectState(
         project.name,
@@ -242,7 +256,9 @@ async function detectEmergencies(
         env,
       );
     } else {
+      logStage("emergency-check.launch", project.name, "start");
       await launch(project.name);
+      logStage("emergency-check.launch", project.name, "done");
       const launchedState = await readProjectState(project.name, env);
       await writeProjectState(
         project.name,
@@ -250,6 +266,8 @@ async function detectEmergencies(
         env,
       );
     }
+
+    logStage("emergency-check", project.name, "done");
   }
 
   // TODO(DEV-16 follow-up): 関連 PR の review comment 検知を gh api で追加する。
@@ -261,6 +279,7 @@ async function manageLocks(
   now: Date,
   tmux: TmuxClient,
   kick: (project: string, reason: string) => Promise<void>,
+  logStage: TickDependencies["logStage"],
 ): Promise<void> {
   for (const project of projects) {
     const state = await readProjectState(project.name, env);
@@ -268,13 +287,19 @@ async function manageLocks(
       continue;
     }
 
+    logStage("lock-check", project.name, "start");
+
     const exists = await tmux.hasSession(state.lock.tmux_session);
     const action = decideLockAction(project, state, exists, now);
     if (action.type === "none") {
+      logStage("lock-check", project.name, "done");
       continue;
     }
     if (action.type === "kick") {
+      logStage("lock-check.kick", project.name, "start");
       await kick(project.name, "作業予算超過");
+      logStage("lock-check.kick", project.name, "done");
+      logStage("lock-check", project.name, "done");
       continue;
     }
     if (action.type === "done" || action.type === "killed") {
@@ -285,6 +310,7 @@ async function manageLocks(
       { ...state, lock: null, last_result: action.type },
       env,
     );
+    logStage("lock-check", project.name, "done");
   }
 }
 
@@ -293,6 +319,7 @@ async function launchDueProjects(
   env: NodeJS.ProcessEnv,
   now: Date,
   launch: (project: string) => Promise<void>,
+  logStage: TickDependencies["logStage"],
 ): Promise<void> {
   for (const project of projects) {
     const state = await readProjectState(project.name, env);
@@ -301,7 +328,9 @@ async function launchDueProjects(
       state.lock == null &&
       (restartRequested || isProjectDue(project, state, now))
     ) {
+      logStage("due-launch", project.name, "start");
       await launch(project.name);
+      logStage("due-launch", project.name, "done");
     }
   }
 }
