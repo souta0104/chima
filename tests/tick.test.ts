@@ -298,7 +298,7 @@ describe("tick", () => {
     });
   });
 
-  it("緊急コメントがなければ launch も kick もせず last_seen_comment_at を更新する", async () => {
+  it("起動しなければ last_seen_comment_at を更新しない", async () => {
     const home = await makeHome({
       last_run: NOW.toISOString(),
       last_seen_comment_at: minutesBefore(10),
@@ -311,7 +311,36 @@ describe("tick", () => {
     expect(dependencies.launch).not.toHaveBeenCalled();
     expect(dependencies.kick).not.toHaveBeenCalled();
     await expect(readState(home)).resolves.toMatchObject({
-      last_seen_comment_at: NOW.toISOString(),
+      last_seen_comment_at: minutesBefore(10),
+    });
+  });
+
+  it("interval 未経過時の人間コメントを保持し、次の due tick で launch する", async () => {
+    const home = await makeHome({
+      last_run: NOW.toISOString(),
+      last_seen_comment_at: minutesBefore(10),
+      lock: null,
+    });
+    let currentTime = NOW;
+    const dependencies = {
+      ...mockDependencies(true, issueWithoutEmergency()),
+      now: () => currentTime,
+    };
+
+    await tick(env(home), dependencies);
+
+    expect(dependencies.launch).not.toHaveBeenCalled();
+    await expect(readState(home)).resolves.toMatchObject({
+      last_seen_comment_at: minutesBefore(10),
+    });
+
+    currentTime = new Date(NOW.getTime() + 30 * 60 * 1000);
+    await tick(env(home), dependencies);
+
+    expect(dependencies.launch).toHaveBeenCalledTimes(1);
+    expect(dependencies.launch).toHaveBeenCalledWith("magonote");
+    await expect(readState(home)).resolves.toMatchObject({
+      last_seen_comment_at: currentTime.toISOString(),
     });
   });
 

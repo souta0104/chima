@@ -253,8 +253,8 @@ async function detectEmergencies(
   launch: (project: string) => Promise<void>,
   kick: (project: string, reason: string) => Promise<void>,
   logStage: TickDependencies["logStage"],
-): Promise<Map<string, boolean>> {
-  const actionableProjects = new Map<string, boolean>();
+): Promise<Set<string>> {
+  const actionableProjects = new Set<string>();
   for (const project of projects) {
     logStage("emergency-check", project.name, "start");
 
@@ -265,21 +265,17 @@ async function detectEmergencies(
       getIssue,
     );
     logStage("emergency-check.fetch-comments", project.name, "done");
-    actionableProjects.set(
-      project.name,
-      hasActionableWork({ ...parent, comments }, state.last_seen_comment_at),
-    );
+    if (
+      hasActionableWork({ ...parent, comments }, state.last_seen_comment_at)
+    ) {
+      actionableProjects.add(project.name);
+    }
     const emergencies = findEmergencyComments(
       comments,
       state.last_seen_comment_at,
     );
-    const nextState: ProjectState = {
-      ...state,
-      last_seen_comment_at: now.toISOString(),
-    };
 
     if (emergencies.length === 0) {
-      await writeProjectState(project.name, nextState, env);
       logStage("emergency-check", project.name, "done");
       continue;
     }
@@ -291,26 +287,17 @@ async function detectEmergencies(
       logStage("emergency-check.kick", project.name, "start");
       await kick(project.name, latest.url);
       logStage("emergency-check.kick", project.name, "done");
-      const kickedState = await readProjectState(project.name, env);
-      await writeProjectState(
+      await markCommentsSeen(
         project.name,
-        {
-          ...kickedState,
-          last_seen_comment_at: now.toISOString(),
-          restart_requested_at: now.toISOString(),
-        },
         env,
+        now,
+        { restart_requested_at: now.toISOString() },
       );
     } else {
       logStage("emergency-check.launch", project.name, "start");
       await launch(project.name);
       logStage("emergency-check.launch", project.name, "done");
-      const launchedState = await readProjectState(project.name, env);
-      await writeProjectState(
-        project.name,
-        { ...launchedState, last_seen_comment_at: now.toISOString() },
-        env,
-      );
+      await markCommentsSeen(project.name, env, now);
     }
 
     logStage("emergency-check", project.name, "done");
@@ -366,7 +353,7 @@ async function launchDueProjects(
   env: NodeJS.ProcessEnv,
   now: Date,
   launch: (project: string) => Promise<void>,
-  actionableProjects: Map<string, boolean>,
+  actionableProjects: Set<string>,
   logStage: TickDependencies["logStage"],
 ): Promise<void> {
   for (const project of projects) {
@@ -378,20 +365,36 @@ async function launchDueProjects(
     if (restartRequested) {
       logStage("due-launch", project.name, "start");
       await launch(project.name);
+      await markCommentsSeen(project.name, env, now);
       logStage("due-launch", project.name, "done");
       continue;
     }
     if (!isProjectDue(project, state, now)) {
       continue;
     }
-    if (actionableProjects.get(project.name) !== true) {
+    if (!actionableProjects.has(project.name)) {
       logStage("due-launch", project.name, "skipped");
       continue;
     }
     logStage("due-launch", project.name, "start");
     await launch(project.name);
+    await markCommentsSeen(project.name, env, now);
     logStage("due-launch", project.name, "done");
   }
+}
+
+async function markCommentsSeen(
+  project: string,
+  env: NodeJS.ProcessEnv,
+  now: Date,
+  updates: Partial<ProjectState> = {},
+): Promise<void> {
+  const state = await readProjectState(project, env);
+  await writeProjectState(
+    project,
+    { ...state, ...updates, last_seen_comment_at: now.toISOString() },
+    env,
+  );
 }
 
 async function getProjectComments(
