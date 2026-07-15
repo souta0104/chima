@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   decideLockAction,
+  hasActionableWork,
   isProjectDue,
   isWithinActiveHours,
   tick,
@@ -105,6 +106,60 @@ describe("lock 判定", () => {
         NOW,
       ),
     ).toEqual({ type: "killed" });
+  });
+});
+
+describe("着手可能な作業の判定", () => {
+  it("未読の人間コメントがあれば着手可能", () => {
+    expect(
+      hasActionableWork(
+        actionableIssue({ comments: [humanComment(minutesBefore(2))] }),
+        minutesBefore(10),
+      ),
+    ).toBe(true);
+  });
+
+  it.each(["unstarted", "started"])(
+    "%s の子イシューがあれば着手可能",
+    (stateType) => {
+      expect(
+        hasActionableWork(
+          actionableIssue({ children: [{ id: "child-id", stateType }] }),
+          NOW.toISOString(),
+        ),
+      ).toBe(true);
+    },
+  );
+
+  it.each(["backlog", "completed", "canceled"])(
+    "%s の子イシューだけなら着手不可",
+    (stateType) => {
+      expect(
+        hasActionableWork(
+          actionableIssue({ children: [{ id: "child-id", stateType }] }),
+          NOW.toISOString(),
+        ),
+      ).toBe(false);
+    },
+  );
+
+  it("Chima の未読コメントだけなら着手不可", () => {
+    expect(
+      hasActionableWork(
+        actionableIssue({
+          comments: [
+            { ...humanComment(minutesBefore(2)), userName: "CHIMA" },
+          ],
+        }),
+        minutesBefore(10),
+      ),
+    ).toBe(false);
+  });
+
+  it("コメントも子イシューもなければ着手不可", () => {
+    expect(
+      hasActionableWork(actionableIssue(), minutesBefore(10)),
+    ).toBe(false);
   });
 });
 
@@ -304,7 +359,7 @@ describe("tick", () => {
       last_run: minutesBefore(30),
       lock: null,
     });
-    const dependencies = mockDependencies(true);
+    const dependencies = mockDependencies(true, issueWithActionableChild());
 
     await tick(env(home), dependencies);
 
@@ -313,6 +368,60 @@ describe("tick", () => {
         ["due-launch", "magonote", "start"],
         ["due-launch", "magonote", "done"],
       ]),
+    );
+  });
+
+  it("未読の人間コメントがあれば due-launch で launch する", async () => {
+    const home = await makeHome({
+      last_run: minutesBefore(30),
+      last_seen_comment_at: minutesBefore(10),
+      lock: null,
+    });
+    const dependencies = mockDependencies(true, issueWithoutEmergency());
+
+    await tick(env(home), dependencies);
+
+    expect(dependencies.launch).toHaveBeenCalledWith("magonote");
+    expect(dependencies.logStage).toHaveBeenCalledWith(
+      "due-launch",
+      "magonote",
+      "start",
+    );
+    expect(dependencies.logStage).toHaveBeenCalledWith(
+      "due-launch",
+      "magonote",
+      "done",
+    );
+  });
+
+  it("unstarted の子イシューがあれば due-launch で launch する", async () => {
+    const home = await makeHome({
+      last_run: minutesBefore(30),
+      last_seen_comment_at: NOW.toISOString(),
+      lock: null,
+    });
+    const dependencies = mockDependencies(true, issueWithActionableChild());
+
+    await tick(env(home), dependencies);
+
+    expect(dependencies.launch).toHaveBeenCalledWith("magonote");
+  });
+
+  it("着手可能な作業がなければ due-launch をスキップする", async () => {
+    const home = await makeHome({
+      last_run: minutesBefore(30),
+      last_seen_comment_at: minutesBefore(10),
+      lock: null,
+    });
+    const dependencies = mockDependencies(true);
+
+    await tick(env(home), dependencies);
+
+    expect(dependencies.launch).not.toHaveBeenCalled();
+    expect(dependencies.logStage).toHaveBeenCalledWith(
+      "due-launch",
+      "magonote",
+      "skipped",
     );
   });
 
@@ -432,6 +541,42 @@ function issueWithChild(): unknown {
     id: "parent",
     children: { nodes: [{ id: "child-id" }] },
     comments: { nodes: [] },
+  };
+}
+
+function issueWithActionableChild(): unknown {
+  return {
+    id: "parent",
+    children: {
+      nodes: [
+        { id: "child-id", state: { id: "state-1", type: "unstarted" } },
+      ],
+    },
+    comments: { nodes: [] },
+  };
+}
+
+function actionableIssue(
+  overrides: {
+    children?: Array<{ id: string; stateType: string | null }>;
+    comments?: Array<ReturnType<typeof humanComment>>;
+  } = {},
+) {
+  return {
+    id: "parent",
+    children: overrides.children ?? [],
+    comments: overrides.comments ?? [],
+  };
+}
+
+function humanComment(timestamp: string) {
+  return {
+    body: "通常コメントです",
+    url: "https://linear.app/comment/human",
+    createdAt: timestamp,
+    updatedAt: timestamp,
+    userName: "Sota" as string | null,
+    botName: null as string | null,
   };
 }
 
