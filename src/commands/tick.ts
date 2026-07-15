@@ -24,7 +24,7 @@ interface LinearComment {
 
 interface LinearIssue {
   id: string;
-  children: Array<{ id: string }>;
+  children: Array<{ id: string; stateType: string | null }>;
   comments: LinearComment[];
 }
 
@@ -47,18 +47,19 @@ export interface TickDependencies {
   getIssue(id: string): Promise<unknown>;
   launch(project: string): Promise<void>;
   kick(project: string, reason: string): Promise<void>;
-  logStage(stage: string, project: string | null, event: "start" | "done"): void;
+  logStage(
+    stage: string,
+    project: string | null,
+    event: "start" | "done" | "skipped",
+  ): void;
 }
 
-// tick の各ステージの開始・完了を stderr に記録する。launchd 環境では
-// StandardErrorPath 経由で tick.log に落ちるため、実行がどのステージ・
-// どのプロジェクトの処理で止まったかを次回起動を待たずに特定できる
-// (DEV-30 follow-up: tick ハング調査)。project は「config読込」のように
-// プロジェクトに紐付かないステージでは null。
+// tick の各ステージの開始・完了・スキップを stderr に記録する。
+// project に紐付かないステージでは project に null を渡す。
 function defaultLogStage(
   stage: string,
   project: string | null,
-  event: "start" | "done",
+  event: "start" | "done" | "skipped",
 ): void {
   const projectPart = project === null ? "" : ` project=${project}`;
   process.stderr.write(
@@ -89,7 +90,7 @@ export async function tick(
   const enabledProjects = projects.filter((project) => project.enabled);
   logStage("config読込", null, "done");
 
-  await detectEmergencies(
+  const actionableProjects = await detectEmergencies(
     enabledProjects,
     env,
     currentTime,
@@ -98,11 +99,17 @@ export async function tick(
     kick,
     logStage,
   );
-
   await manageLocks(projects, env, currentTime, tmux, kick, logStage);
 
   logStage("due判定・launch", null, "start");
-  await launchDueProjects(enabledProjects, env, currentTime, launch, logStage);
+  await launchDueProjects(
+    enabledProjects,
+    env,
+    currentTime,
+    launch,
+    actionableProjects,
+    logStage,
+  );
   logStage("due判定・launch", null, "done");
 }
 
@@ -193,8 +200,7 @@ export function findEmergencyComments(
       return (
         commentTime !== null &&
         (lastSeen === null || commentTime > lastSeen) &&
-        comment.botName?.toLowerCase() !== "chima" &&
-        comment.userName?.toLowerCase() !== "chima" &&
+        isHumanComment(comment) &&
         comment.body.includes(EMERGENCY_MARKER)
       );
     })
@@ -205,6 +211,40 @@ export function findEmergencyComments(
     }));
 }
 
+export function hasActionableWork(
+  parent: LinearIssue,
+  lastSeenCommentAt: string | undefined,
+): boolean {
+  const lastSeen = timestamp(lastSeenCommentAt);
+  const hasUnreadHumanComment = parent.comments.some((comment) => {
+    const commentTime =
+      timestamp(comment.updatedAt) ?? timestamp(comment.createdAt);
+    return (
+      commentTime !== null &&
+      (lastSeen === null || commentTime > lastSeen) &&
+      isHumanComment(comment)
+    );
+  });
+
+  return (
+    hasUnreadHumanComment ||
+    parent.children.some(
+      (child) =>
+        child.stateType === "unstarted" || child.stateType === "started",
+    )
+  );
+}
+
+function isHumanComment(comment: LinearComment): boolean {
+  if (comment.botName !== null) {
+    return false;
+  }
+  if (comment.userName === null) {
+    return false;
+  }
+  return comment.userName.toLowerCase() !== "chima";
+}
+
 async function detectEmergencies(
   projects: ProjectConfig[],
   env: NodeJS.ProcessEnv,
@@ -213,27 +253,29 @@ async function detectEmergencies(
   launch: (project: string) => Promise<void>,
   kick: (project: string, reason: string) => Promise<void>,
   logStage: TickDependencies["logStage"],
-): Promise<void> {
+): Promise<Set<string>> {
+  const actionableProjects = new Set<string>();
   for (const project of projects) {
     logStage("emergency-check", project.name, "start");
 
     const state = await readProjectState(project.name, env);
-
     logStage("emergency-check.fetch-comments", project.name, "start");
-    const comments = await getProjectComments(project.parent_issue, getIssue);
+    const { parent, comments } = await getProjectComments(
+      project.parent_issue,
+      getIssue,
+    );
     logStage("emergency-check.fetch-comments", project.name, "done");
-
+    if (
+      hasActionableWork({ ...parent, comments }, state.last_seen_comment_at)
+    ) {
+      actionableProjects.add(project.name);
+    }
     const emergencies = findEmergencyComments(
       comments,
       state.last_seen_comment_at,
     );
-    const nextState: ProjectState = {
-      ...state,
-      last_seen_comment_at: now.toISOString(),
-    };
 
     if (emergencies.length === 0) {
-      await writeProjectState(project.name, nextState, env);
       logStage("emergency-check", project.name, "done");
       continue;
     }
@@ -245,32 +287,24 @@ async function detectEmergencies(
       logStage("emergency-check.kick", project.name, "start");
       await kick(project.name, latest.url);
       logStage("emergency-check.kick", project.name, "done");
-      const kickedState = await readProjectState(project.name, env);
-      await writeProjectState(
+      await markCommentsSeen(
         project.name,
-        {
-          ...kickedState,
-          last_seen_comment_at: now.toISOString(),
-          restart_requested_at: now.toISOString(),
-        },
         env,
+        now,
+        { restart_requested_at: now.toISOString() },
       );
     } else {
       logStage("emergency-check.launch", project.name, "start");
       await launch(project.name);
       logStage("emergency-check.launch", project.name, "done");
-      const launchedState = await readProjectState(project.name, env);
-      await writeProjectState(
-        project.name,
-        { ...launchedState, last_seen_comment_at: now.toISOString() },
-        env,
-      );
+      await markCommentsSeen(project.name, env, now);
     }
 
     logStage("emergency-check", project.name, "done");
   }
 
   // TODO(DEV-16 follow-up): 関連 PR の review comment 検知を gh api で追加する。
+  return actionableProjects;
 }
 
 async function manageLocks(
@@ -319,32 +353,60 @@ async function launchDueProjects(
   env: NodeJS.ProcessEnv,
   now: Date,
   launch: (project: string) => Promise<void>,
+  actionableProjects: Set<string>,
   logStage: TickDependencies["logStage"],
 ): Promise<void> {
   for (const project of projects) {
     const state = await readProjectState(project.name, env);
     const restartRequested = timestamp(state.restart_requested_at) !== null;
-    if (
-      state.lock == null &&
-      (restartRequested || isProjectDue(project, state, now))
-    ) {
+    if (state.lock != null) {
+      continue;
+    }
+    if (restartRequested) {
       logStage("due-launch", project.name, "start");
       await launch(project.name);
+      await markCommentsSeen(project.name, env, now);
       logStage("due-launch", project.name, "done");
+      continue;
     }
+    if (!isProjectDue(project, state, now)) {
+      continue;
+    }
+    if (!actionableProjects.has(project.name)) {
+      logStage("due-launch", project.name, "skipped");
+      continue;
+    }
+    logStage("due-launch", project.name, "start");
+    await launch(project.name);
+    await markCommentsSeen(project.name, env, now);
+    logStage("due-launch", project.name, "done");
   }
+}
+
+async function markCommentsSeen(
+  project: string,
+  env: NodeJS.ProcessEnv,
+  now: Date,
+  updates: Partial<ProjectState> = {},
+): Promise<void> {
+  const state = await readProjectState(project, env);
+  await writeProjectState(
+    project,
+    { ...state, ...updates, last_seen_comment_at: now.toISOString() },
+    env,
+  );
 }
 
 async function getProjectComments(
   parentIssueId: string,
   getIssue: (id: string) => Promise<unknown>,
-): Promise<LinearComment[]> {
+): Promise<{ parent: LinearIssue; comments: LinearComment[] }> {
   const parent = parseIssue(await getIssue(parentIssueId));
   const comments = [...parent.comments];
   for (const child of parent.children) {
     comments.push(...parseIssue(await getIssue(child.id)).comments);
   }
-  return comments;
+  return { parent, comments };
 }
 
 function parseIssue(value: unknown): LinearIssue {
@@ -356,7 +418,13 @@ function parseIssue(value: unknown): LinearIssue {
       ? value.children.nodes
           .filter(isRecord)
           .filter((child) => typeof child.id === "string")
-          .map((child) => ({ id: child.id as string }))
+          .map((child) => ({
+            id: child.id as string,
+            stateType:
+              isRecord(child.state) && typeof child.state.type === "string"
+                ? child.state.type
+                : null,
+          }))
       : [];
   const comments =
     isRecord(value.comments) && Array.isArray(value.comments.nodes)
