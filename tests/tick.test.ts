@@ -277,6 +277,63 @@ describe("tick", () => {
 
     expect(dependencies.launch).toHaveBeenCalledWith("magonote");
   });
+
+  it("各ステージの開始・完了をプロジェクト名付きで順番にログする", async () => {
+    const home = await makeHome({
+      last_run: NOW.toISOString(),
+      lock: null,
+    });
+    const dependencies = mockDependencies(true);
+
+    await tick(env(home), dependencies);
+
+    expect(dependencies.logStage.mock.calls).toEqual([
+      ["config読込", null, "start"],
+      ["config読込", null, "done"],
+      ["emergency-check", "magonote", "start"],
+      ["emergency-check.fetch-comments", "magonote", "start"],
+      ["emergency-check.fetch-comments", "magonote", "done"],
+      ["emergency-check", "magonote", "done"],
+      ["due判定・launch", null, "start"],
+      ["due判定・launch", null, "done"],
+    ]);
+  });
+
+  it("due な launch をプロジェクト名付きでログする", async () => {
+    const home = await makeHome({
+      last_run: minutesBefore(30),
+      lock: null,
+    });
+    const dependencies = mockDependencies(true);
+
+    await tick(env(home), dependencies);
+
+    expect(dependencies.logStage.mock.calls).toEqual(
+      expect.arrayContaining([
+        ["due-launch", "magonote", "start"],
+        ["due-launch", "magonote", "done"],
+      ]),
+    );
+  });
+
+  it("lock 超過時の kick をプロジェクト名付きでログする", async () => {
+    const home = await makeHome({
+      last_run: NOW.toISOString(),
+      lock: lock(minutesBefore(21)),
+    });
+    const dependencies = mockDependencies(true);
+
+    await tick(env(home), dependencies);
+
+    expect(dependencies.logStage.mock.calls).toEqual(
+      expect.arrayContaining([
+        ["lock-check", "magonote", "start"],
+        ["lock-check.kick", "magonote", "start"],
+        ["lock-check.kick", "magonote", "done"],
+        ["lock-check", "magonote", "done"],
+      ]),
+    );
+  });
 });
 
 async function makeHome(
@@ -307,6 +364,7 @@ function mockDependencies(sessionExists: boolean, issue: unknown = emptyIssue())
     getIssue: vi.fn(async (_id: string) => issue),
     launch: vi.fn(async () => undefined),
     kick: vi.fn(async () => undefined),
+    logStage: vi.fn(),
   };
 }
 

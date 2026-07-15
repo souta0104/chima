@@ -43,6 +43,17 @@ describe("LinearClient", () => {
     expectRequest(fetchMock, ISSUE_QUERY, { id: "DEV-13" });
   });
 
+  it("Linear API が応答しない場合に無期限に待たないよう signal を渡す", async () => {
+    const home = await makeTemporaryHomeWithCredentials();
+    const fetchMock = mockFetch({ data: { issue: {} } });
+    const client = new LinearClient({ CHIMA_HOME: home }, fetchMock);
+
+    await client.getIssue("DEV-13");
+
+    const [, init] = vi.mocked(fetchMock).mock.calls[0]!;
+    expect(init?.signal).toBeInstanceOf(AbortSignal);
+  });
+
   it("parentId を含む comment を作成する", async () => {
     const home = await makeTemporaryHomeWithCredentials();
     const result = { success: true, comment: { id: "comment-id" } };
@@ -249,6 +260,7 @@ describe("Linear credentials", () => {
     const body = new URLSearchParams(String(init?.body));
     expect(body.get("grant_type")).toBe("refresh_token");
     expect(body.get("refresh_token")).toBe("dummy-refresh-token");
+    expect(init?.signal).toBeInstanceOf(AbortSignal);
   });
 
   it("refresh_token がなければエラーになる", async () => {
