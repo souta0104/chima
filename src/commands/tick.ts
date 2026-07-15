@@ -200,8 +200,7 @@ export function findEmergencyComments(
       return (
         commentTime !== null &&
         (lastSeen === null || commentTime > lastSeen) &&
-        comment.botName?.toLowerCase() !== "chima" &&
-        comment.userName?.toLowerCase() !== "chima" &&
+        isHumanComment(comment) &&
         comment.body.includes(EMERGENCY_MARKER)
       );
     })
@@ -223,8 +222,7 @@ export function hasActionableWork(
     return (
       commentTime !== null &&
       (lastSeen === null || commentTime > lastSeen) &&
-      comment.botName?.toLowerCase() !== "chima" &&
-      comment.userName?.toLowerCase() !== "chima"
+      isHumanComment(comment)
     );
   });
 
@@ -235,6 +233,16 @@ export function hasActionableWork(
         child.stateType === "unstarted" || child.stateType === "started",
     )
   );
+}
+
+function isHumanComment(comment: LinearComment): boolean {
+  if (comment.botName !== null) {
+    return false;
+  }
+  if (comment.userName === null) {
+    return false;
+  }
+  return comment.userName.toLowerCase() !== "chima";
 }
 
 async function detectEmergencies(
@@ -259,7 +267,7 @@ async function detectEmergencies(
     logStage("emergency-check.fetch-comments", project.name, "done");
     actionableProjects.set(
       project.name,
-      hasActionableWork(parent, state.last_seen_comment_at),
+      hasActionableWork({ ...parent, comments }, state.last_seen_comment_at),
     );
     const emergencies = findEmergencyComments(
       comments,

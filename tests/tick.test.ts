@@ -156,6 +156,40 @@ describe("着手可能な作業の判定", () => {
     ).toBe(false);
   });
 
+  it("userName と botName が両方 null の未読コメントだけなら着手不可", () => {
+    expect(
+      hasActionableWork(
+        actionableIssue({
+          comments: [
+            {
+              ...humanComment(minutesBefore(2)),
+              userName: null,
+              botName: null,
+            },
+          ],
+        }),
+        minutesBefore(10),
+      ),
+    ).toBe(false);
+  });
+
+  it("Chima 以外の bot の未読コメントだけなら着手不可", () => {
+    expect(
+      hasActionableWork(
+        actionableIssue({
+          comments: [
+            {
+              ...humanComment(minutesBefore(2)),
+              userName: null,
+              botName: "Other Bot",
+            },
+          ],
+        }),
+        minutesBefore(10),
+      ),
+    ).toBe(false);
+  });
+
   it("コメントも子イシューもなければ着手不可", () => {
     expect(
       hasActionableWork(actionableIssue(), minutesBefore(10)),
@@ -317,6 +351,25 @@ describe("tick", () => {
     expect(dependencies.kick).not.toHaveBeenCalled();
   });
 
+  it("user と botActor が両方 null の緊急コメントは検知対象から除外する", async () => {
+    const home = await makeHome({
+      last_run: NOW.toISOString(),
+      last_seen_comment_at: minutesBefore(10),
+      lock: null,
+    });
+    const issue = issueWithEmergency() as {
+      comments: { nodes: Array<Record<string, unknown>> };
+    };
+    issue.comments.nodes[0]!.user = null;
+    issue.comments.nodes[0]!.botActor = null;
+    const dependencies = mockDependencies(true, issue);
+
+    await tick(env(home), dependencies);
+
+    expect(dependencies.launch).not.toHaveBeenCalled();
+    expect(dependencies.kick).not.toHaveBeenCalled();
+  });
+
   it("restart 予約があり lock がなくなれば active_hours 外でも launch する", async () => {
     const home = await makeHome(
       {
@@ -381,6 +434,33 @@ describe("tick", () => {
 
     await tick(env(home), dependencies);
 
+    expect(dependencies.launch).toHaveBeenCalledWith("magonote");
+    expect(dependencies.logStage).toHaveBeenCalledWith(
+      "due-launch",
+      "magonote",
+      "start",
+    );
+    expect(dependencies.logStage).toHaveBeenCalledWith(
+      "due-launch",
+      "magonote",
+      "done",
+    );
+  });
+
+  it("子イシューだけに未読の人間コメントがあれば due-launch で launch する", async () => {
+    const home = await makeHome({
+      last_run: minutesBefore(30),
+      last_seen_comment_at: minutesBefore(10),
+      lock: null,
+    });
+    const dependencies = mockDependencies(true);
+    dependencies.getIssue.mockImplementation(async (id) =>
+      id === "DEV-10" ? issueWithChild() : issueWithoutEmergency(),
+    );
+
+    await tick(env(home), dependencies);
+
+    expect(dependencies.getIssue).toHaveBeenCalledWith("child-id");
     expect(dependencies.launch).toHaveBeenCalledWith("magonote");
     expect(dependencies.logStage).toHaveBeenCalledWith(
       "due-launch",
