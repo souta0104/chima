@@ -1,11 +1,11 @@
-import { readFile, stat, writeFile } from "node:fs/promises";
+import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Readable } from "node:stream";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { recordSession } from "../src/commands/session.js";
+import { markWorkerReady, recordSession } from "../src/commands/session.js";
 import { runCli } from "../src/cli.js";
 
 const temporaryDirectories: string[] = [];
@@ -113,9 +113,79 @@ describe("session record", () => {
   });
 });
 
+describe("session ready", () => {
+  it("実行中プロジェクトに worker_ready_at を記録する", async () => {
+    const home = await makeTemporaryHome();
+    const projectStatePath = join(home, "state", "projects", "magonote.json");
+    await writeFile(
+      projectStatePath,
+      JSON.stringify({
+        lock: {
+          tmux_session: "chima-magonote",
+          started_at: "2026-07-16T00:00:00.000Z",
+        },
+        retained: "value",
+      }),
+      "utf8",
+    );
+
+    await markWorkerReady(
+      "magonote",
+      { CHIMA_HOME: home },
+      () => new Date("2026-07-16T00:00:30.000Z"),
+    );
+
+    await expect(readFile(projectStatePath, "utf8")).resolves.toContain(
+      '"worker_ready_at": "2026-07-16T00:00:30.000Z"',
+    );
+    await expect(readFile(projectStatePath, "utf8")).resolves.toContain(
+      '"retained": "value"',
+    );
+  });
+
+  it("lock がないプロジェクトでは失敗する", async () => {
+    const home = await makeTemporaryHome();
+
+    await expect(
+      markWorkerReady("magonote", { CHIMA_HOME: home }),
+    ).rejects.toThrow("magonote に実行中のワーカーがありません");
+  });
+
+  it("CLI から ready を記録できる", async () => {
+    const home = await makeTemporaryHome();
+    const projectStatePath = join(home, "state", "projects", "magonote.json");
+    await writeFile(
+      projectStatePath,
+      JSON.stringify({
+        lock: {
+          tmux_session: "chima-magonote",
+          started_at: "2026-07-16T00:00:00.000Z",
+        },
+      }),
+      "utf8",
+    );
+
+    await expect(
+      runCli(
+        ["node", "chima", "session", "ready", "magonote"],
+        { CHIMA_HOME: home },
+        {
+          stdin: Readable.from([]),
+          writeStdout: vi.fn(),
+          writeStderr: vi.fn(),
+        },
+      ),
+    ).resolves.toBe(0);
+    await expect(readFile(projectStatePath, "utf8")).resolves.toContain(
+      '"worker_ready_at"',
+    );
+  });
+});
+
 async function makeTemporaryHome(): Promise<string> {
   const { mkdtemp } = await import("node:fs/promises");
   const directory = await mkdtemp(join(tmpdir(), "chima-session-test-"));
   temporaryDirectories.push(directory);
+  await mkdir(join(directory, "state", "projects"), { recursive: true });
   return directory;
 }

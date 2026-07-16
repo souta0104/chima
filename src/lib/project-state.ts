@@ -16,6 +16,7 @@ export interface ProjectState extends Record<string, unknown> {
   last_run?: string;
   last_seen_comment_at?: string;
   lock?: ProjectLock | null;
+  worker_ready_at?: string | null;
   wrapup_requested_at?: string | null;
   checkpoint_done_at?: string | null;
   last_result?: "done" | "killed" | "crashed";

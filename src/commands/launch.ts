@@ -36,6 +36,7 @@ export async function launchProject(
       ...state,
       last_run: currentTime,
       lock: { tmux_session: session, started_at: currentTime },
+      worker_ready_at: null,
       wrapup_requested_at: null,
       checkpoint_done_at: null,
       restart_requested_at: null,
