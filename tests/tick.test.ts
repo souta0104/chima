@@ -594,7 +594,11 @@ function projectConfig(): ProjectConfig {
     interval_min: 30,
     work_budget_min: 20,
     active_hours: "09-24",
-    orchestrator_model: "claude-sonnet-5",
+    worker: {
+      runtime: "claude-code",
+      model: "claude-sonnet-5",
+      planner_model: "claude-fable-5",
+    },
     enabled: true,
   };
 }

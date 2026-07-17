@@ -63,6 +63,27 @@ describe("guard", () => {
     ).resolves.not.toBe("");
   });
 
+  it("Codex transcript の解析に失敗しても lock の経過時間で収束する", async () => {
+    const home = await makeGuardHome({ runtime: "codex" });
+    await writeProjectState(home, {
+      lock: {
+        tmux_session: "chima-magonote",
+        started_at: "2026-07-11T00:00:00.000Z",
+      },
+    });
+
+    await expect(
+      guard(
+        JSON.stringify({
+          session_id: "session-123",
+          transcript_path: join(home, "missing.jsonl"),
+        }),
+        env(home),
+        at("2026-07-11T00:20:00.000Z"),
+      ),
+    ).resolves.not.toBe("");
+  });
+
   it("session state がなくても lock の経過時間が予算以上なら収束指示を返す", async () => {
     const home = await makeGuardHome();
     await writeProjectState(home, {
@@ -159,6 +180,43 @@ describe("guard", () => {
 });
 
 describe("guard --stop-gate", () => {
+  it("Codex Stop で最新使用率が閾値に達したらチェックポイント完了まで継続する", async () => {
+    const home = await makeGuardHome({ runtime: "codex" });
+    const transcript = join(home, "transcript.jsonl");
+    await writeFile(
+      transcript,
+      `${JSON.stringify({
+        type: "event_msg",
+        payload: {
+          type: "token_count",
+          info: {
+            last_token_usage: { total_tokens: 52_000 },
+            model_context_window: 112_000,
+          },
+        },
+      })}\n`,
+      "utf8",
+    );
+    await writeProjectState(home, {
+      lock: {
+        tmux_session: "chima-magonote",
+        started_at: "2026-07-11T00:00:00.000Z",
+      },
+    });
+
+    const output = await stopGate(
+      JSON.stringify({ session_id: "session-123", transcript_path: transcript }),
+      env(home),
+      at("2026-07-11T00:01:00.000Z"),
+    );
+
+    expect(JSON.parse(output).decision).toBe("block");
+    await expect(readProjectState(home)).resolves.toMatchObject({
+      wrapup_requested_at: "2026-07-11T00:01:00.000Z",
+      stop_gate_blocked_session_id: "session-123",
+    });
+  });
+
   it("wrapup_requested_at がなければブロックしない", async () => {
     const home = await makeGuardHome();
     await writeProjectState(home, { last_result: "done" });
@@ -220,7 +278,7 @@ describe("guard --stop-gate", () => {
   });
 });
 
-async function makeGuardHome(): Promise<string> {
+async function makeGuardHome(worker?: Record<string, unknown>): Promise<string> {
   const home = await mkdtemp(join(tmpdir(), "chima-guard-test-"));
   temporaryDirectories.push(home);
   await mkdir(join(home, "config"), { recursive: true });
@@ -232,6 +290,7 @@ async function makeGuardHome(): Promise<string> {
         name: "magonote",
         context_threshold_pct: 40,
         work_budget_min: 20,
+        ...(worker === undefined ? {} : { worker }),
       },
     ],
   });

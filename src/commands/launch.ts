@@ -4,6 +4,8 @@ import {
   writeProjectState,
 } from "../lib/project-state.js";
 import { tmuxClient, type TmuxClient } from "../lib/tmux.js";
+import { getChimaPaths } from "../lib/state.js";
+import { buildWorkerCommand } from "../lib/runtime.js";
 
 export async function launchProject(
   projectName: string,
@@ -15,18 +17,17 @@ export async function launchProject(
   const state = await readProjectState(projectName, env);
   const session = `chima-${projectName}`;
   const currentTime = now().toISOString();
+  const workerCommand = buildWorkerCommand(
+    projectName,
+    project.worker,
+    getChimaPaths(env).home,
+  );
 
   await tmux.newSession(
     session,
     project.repo,
-    "claude",
-    [
-      "--permission-mode",
-      "auto",
-      "--model",
-      project.orchestrator_model,
-      `/worker-run ${projectName}`,
-    ],
+    workerCommand.command,
+    workerCommand.args,
     { ...process.env, ...env, CHIMA_PROJECT: projectName },
   );
 

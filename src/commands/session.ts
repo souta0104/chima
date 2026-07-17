@@ -17,6 +17,10 @@ export interface SessionState {
   duration_ms: number | null;
   updated_at: string;
   project?: string;
+  token_count?: number | null;
+  model_context_window?: number | null;
+  transcript_offset?: number;
+  usage_source_status?: "ok" | "unavailable" | "unsupported";
 }
 
 export async function recordSession(

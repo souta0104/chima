@@ -9,8 +9,22 @@ export interface ProjectConfig {
   interval_min: number;
   work_budget_min: number;
   active_hours: string;
-  orchestrator_model: string;
+  worker: WorkerConfig;
   enabled: boolean;
+}
+
+export type WorkerConfig = ClaudeCodeWorkerConfig | CodexWorkerConfig;
+
+export interface ClaudeCodeWorkerConfig {
+  runtime: "claude-code";
+  model: string;
+  planner_model: string;
+}
+
+export interface CodexWorkerConfig {
+  runtime: "codex";
+  model: string;
+  reasoning_effort: "minimal" | "low" | "medium" | "high" | "xhigh";
 }
 
 interface ProjectsConfig {
@@ -20,7 +34,7 @@ interface ProjectsConfig {
 export interface LaunchProjectConfig {
   name: string;
   repo: string;
-  orchestrator_model: string;
+  worker: WorkerConfig;
 }
 
 export async function readProjectsConfig(
@@ -63,7 +77,7 @@ function isLaunchProjectConfig(value: unknown): value is LaunchProjectConfig {
     isRecord(value) &&
     typeof value.name === "string" &&
     typeof value.repo === "string" &&
-    typeof value.orchestrator_model === "string"
+    isWorkerConfig(value.worker)
   );
 }
 
@@ -79,8 +93,26 @@ function isProjectConfig(value: unknown): value is ProjectConfig {
     isFiniteNumber(value.interval_min) &&
     isFiniteNumber(value.work_budget_min) &&
     typeof value.active_hours === "string" &&
-    typeof value.orchestrator_model === "string" &&
+    isWorkerConfig(value.worker) &&
     typeof value.enabled === "boolean"
+  );
+}
+
+function isWorkerConfig(value: unknown): value is WorkerConfig {
+  if (!isRecord(value) || typeof value.model !== "string") {
+    return false;
+  }
+
+  if (value.runtime === "claude-code") {
+    return typeof value.planner_model === "string";
+  }
+
+  return (
+    value.runtime === "codex" &&
+    typeof value.reasoning_effort === "string" &&
+    ["minimal", "low", "medium", "high", "xhigh"].includes(
+      value.reasoning_effort,
+    )
   );
 }
 

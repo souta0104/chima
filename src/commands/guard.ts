@@ -7,6 +7,7 @@ import {
   writeJsonFile,
 } from "../lib/state.js";
 import type { SessionState } from "./session.js";
+import { recordCodexUsage } from "../lib/codex-usage.js";
 
 const THROTTLE_MS = 2 * 60 * 1000;
 const SESSION_STALE_MS = 5 * 60 * 1000;
@@ -19,6 +20,7 @@ interface ProjectConfig {
   name?: unknown;
   context_threshold_pct?: unknown;
   work_budget_min?: unknown;
+  worker?: unknown;
 }
 
 interface ProjectsConfig {
@@ -56,6 +58,10 @@ export async function guard(
     const project = findProject(config, projectName);
     if (project === null) {
       return "";
+    }
+
+    if (isCodexProject(project)) {
+      await recordCodexUsage(input, env, now);
     }
 
     const statePath = join(paths.projects, `${projectName}.json`);
@@ -108,8 +114,32 @@ export async function stopGate(
     }
 
     const paths = getChimaPaths(env);
+    const config = await readJsonFile<ProjectsConfig>(
+      join(paths.config, "projects.json"),
+    );
+    const project = findProject(config, projectName);
+    if (project !== null && isCodexProject(project)) {
+      await recordCodexUsage(input, env, now);
+    }
     const statePath = join(paths.projects, `${projectName}.json`);
-    const state = await readProjectStateSafely(statePath);
+    let state = await readProjectStateSafely(statePath);
+    const currentTime = now();
+    if (project !== null && isCodexProject(project) && state !== null) {
+      const session = await readSessionSafely(
+        join(paths.sessions, `${sessionId}.json`),
+      );
+      if (
+        !isPresent(state.wrapup_requested_at) &&
+        thresholdExceeded(session, project, state, currentTime)
+      ) {
+        state = {
+          ...state,
+          wrapup_requested_at: currentTime.toISOString(),
+        };
+        await ensureChimaDirectories(env);
+        await writeJsonFile(statePath, state);
+      }
+    }
     if (
       state === null ||
       !isPresent(state.wrapup_requested_at) ||
@@ -125,7 +155,7 @@ export async function stopGate(
     await ensureChimaDirectories(env);
     await writeJsonFile(statePath, {
       ...state,
-      stop_gate_blocked_at: now().toISOString(),
+      stop_gate_blocked_at: currentTime.toISOString(),
       stop_gate_blocked_session_id: sessionId,
     });
 
@@ -160,6 +190,12 @@ function findProject(
       isRecord(candidate) && candidate.name === projectName,
   );
   return project ?? null;
+}
+
+function isCodexProject(project: ProjectConfig): boolean {
+  return (
+    isRecord(project.worker) && project.worker.runtime === "codex"
+  );
 }
 
 function thresholdExceeded(

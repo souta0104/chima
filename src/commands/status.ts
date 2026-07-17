@@ -89,7 +89,7 @@ export function formatStatusText(status: StatusOutput): string {
         `session=${
           session === null
             ? "none"
-            : `${display(session.used_pct)}%/${display(session.duration_ms)}ms/${session.updated_at}`
+            : `${display(session.used_pct)}%/${display(session.duration_ms)}ms/${session.updated_at}/usage=${display(session.usage_source_status)}`
         }`,
       ].join(" ");
     })
@@ -127,11 +127,8 @@ function latestSession(
     return null;
   }
 
-  return {
-    used_pct: session.used_pct,
-    duration_ms: session.duration_ms,
-    updated_at: session.updated_at,
-  };
+  const { project: _project, ...publicSession } = session;
+  return publicSession;
 }
 
 function display(value: unknown): string {
