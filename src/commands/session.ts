@@ -1,5 +1,9 @@
 import { join } from "node:path";
 
+import {
+  readProjectState,
+  writeProjectState,
+} from "../lib/project-state.js";
 import { ensureChimaDirectories, writeJsonFile } from "../lib/state.js";
 
 interface StatuslineInput {
@@ -51,6 +55,23 @@ export async function recordSession(
   }
 
   return input;
+}
+
+export async function markWorkerReady(
+  project: string,
+  env: NodeJS.ProcessEnv = process.env,
+  now: () => Date = () => new Date(),
+): Promise<void> {
+  const state = await readProjectState(project, env);
+  if (state.lock == null) {
+    throw new Error(`${project} に実行中のワーカーがありません`);
+  }
+
+  await writeProjectState(
+    project,
+    { ...state, worker_ready_at: now().toISOString() },
+    env,
+  );
 }
 
 function numberOrNull(value: unknown): number | null {

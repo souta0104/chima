@@ -11,6 +11,7 @@ import { kickProject } from "./kick.js";
 import { launchProject } from "./launch.js";
 
 const WRAPUP_GRACE_MS = 5 * 60 * 1000;
+const WORKER_STARTUP_GRACE_MS = 2 * 60 * 1000;
 const EMERGENCY_MARKER = "[今すぐ確認]";
 
 interface LinearComment {
@@ -37,6 +38,7 @@ export interface EmergencyComment {
 export type LockAction =
   | { type: "none" }
   | { type: "crashed" }
+  | { type: "startup-failed" }
   | { type: "done" }
   | { type: "kick" }
   | { type: "killed" };
@@ -168,6 +170,15 @@ export function decideLockAction(
     return { type: "done" };
   }
 
+  const startedAt = timestamp(state.lock.started_at);
+  if (
+    timestamp(state.worker_ready_at) === null &&
+    startedAt !== null &&
+    now.getTime() - startedAt >= WORKER_STARTUP_GRACE_MS
+  ) {
+    return { type: "startup-failed" };
+  }
+
   const wrapupRequestedAt = timestamp(state.wrapup_requested_at);
   if (
     wrapupRequestedAt !== null &&
@@ -176,7 +187,6 @@ export function decideLockAction(
     return { type: "killed" };
   }
 
-  const startedAt = timestamp(state.lock.started_at);
   if (
     wrapupRequestedAt === null &&
     startedAt !== null &&
@@ -336,12 +346,24 @@ async function manageLocks(
       logStage("lock-check", project.name, "done");
       continue;
     }
-    if (action.type === "done" || action.type === "killed") {
+    if (
+      action.type === "done" ||
+      action.type === "killed" ||
+      action.type === "startup-failed"
+    ) {
+      if (action.type === "startup-failed") {
+        logStage("lock-check.startup-failed", project.name, "start");
+      }
       await tmux.killSession(state.lock.tmux_session);
+      if (action.type === "startup-failed") {
+        logStage("lock-check.startup-failed", project.name, "done");
+      }
     }
+    const lastResult =
+      action.type === "startup-failed" ? "crashed" : action.type;
     await writeProjectState(
       project.name,
-      { ...state, lock: null, last_result: action.type },
+      { ...state, lock: null, last_result: lastResult },
       env,
     );
     logStage("lock-check", project.name, "done");

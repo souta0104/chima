@@ -27,13 +27,37 @@ worker-run skill  → ワーカーの行動規範 (Linear 運用プロトコル 
 
 ## セットアップ
 
-`install.sh` は bin の symlink、`~/.chima`、launchd、共通 `worker-run` skill、
-Codex hooks を配置する。既存の `~/.codex/hooks.json` は保持し、同じ hook を
-二重追加しない。Claude Code の hooks/statusline は表示設定との統合が必要なため、
-`connectors/claude-code/settings.snippet.json` を参照して手動で追加する。
+最初に依存関係を導入してビルドする。
 
-プロジェクト設定は `config/projects.example.json` を参照する。`worker.runtime` は
-`claude-code` または `codex` を明示し、自動切替は行わない。
+```sh
+pnpm install
+pnpm build
+```
+
+次に chima CLI、共通 `worker-run` skill、Codex hooks を配置する。既存の
+`~/.codex/hooks.json` は保持し、同じ hook を二重追加しない。
+
+```sh
+./install.sh
+```
+
+Claude Code の `PostToolUse` / `Stop` hook と statusline 連携を追加する場合は、
+次のオプションを指定する。既存の hook と statusline は保持される。
+
+```sh
+./install.sh --enable-claude-code
+```
+
+`~/.chima/config/projects.json` に有効なプロジェクトを登録した後、launchd の
+定期実行を有効化する。
+
+```sh
+./install.sh --enable-launchd
+```
+
+両方のオプションは同時に指定できる。プロジェクト設定は
+`config/projects.example.json` を参照する。`worker.runtime` は `claude-code`
+または `codex` を明示し、自動切替は行わない。
 
 Codex の使用率は transcript の最新 `last_token_usage.total_tokens` と
 `model_context_window` から計算する。12,000 tokens を固定で控除し、Codex TUI と

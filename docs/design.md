@@ -116,14 +116,13 @@ chima/
     hooks/context-guard.sh   # PostToolUse: stdin をそのまま chima guard へ中継
     hooks/stop-gate.sh       # Stop: stdin を chima guard --stop-gate へ中継
     statusline-wrapper.sh    # stdin JSON を chima session record に通し、
-                             # 出力を既存 ~/.claude/statusline-command.sh へパイプ。
+                             # 出力を既存 statusline command へパイプ。
                              # 既存の statusline 表示は一切変えない
     skills/worker-run/SKILL.md
     settings.snippet.json    # settings.json に追記する hooks 設定の見本
-  launchd/com.chima.tick.plist   # StartInterval 120 で chima tick
   config/projects.example.json
-  install.sh                 # bin の symlink 配置、~/.chima 初期化、launchctl load、
-                             # settings.json への hooks/statusline 追記ガイド表示
+  install.sh                 # bin / worker-run skill の symlink 配置と ~/.chima 初期化。
+                             # 明示オプションで Claude Code 連携と launchd を有効化
   docs/design.md             # 本設計の清書 (背景・根拠込み)
   README.md
 ```
@@ -145,7 +144,7 @@ Claude 非依存を明示するため ~/.claude の外に置く。
   state/projects/<name>.json
       # { last_run, last_seen_comment_at,
       #   lock: { tmux_session, started_at } | null,
-      #   wrapup_requested_at, checkpoint_done_at,
+      #   worker_ready_at, wrapup_requested_at, checkpoint_done_at,
       #   last_result: "done" | "killed" | "crashed" }
   state/pending/<name>.md        # Linear 不通時のチェックポイント退避 (上書き 1 枚)
   logs/                          # tick / launch / kick の実行ログ (日付ローテ)
@@ -184,10 +183,7 @@ chima は人間の API key ではなく、Linear の OAuth Application を actor
      関連 PR の新規レビューコメント (`gh api`) を取得。`[今すぐ確認]` を含むものが
      あれば: 実行中なら `chima kick --reason "<コメント URL>"` + restart 予約フラグ、
      非実行中なら即 `chima launch`。last_seen_comment_at を更新
-  2. lock 管理: lock があるのに tmux セッションが消えていれば crashed として記録し
-     lock 解除。done マーカー (checkpoint_done_at) 付きの tmux セッションは kill して
-     掃除。作業予算超過なら kick、kick 後 5 分の猶予を過ぎても生きていれば
-     tmux kill + last_result=killed を記録
+  2. lock 管理: lock があるのに tmux セッションが消えていれば crashed として記録し lock 解除。起動から 2 分以内に `worker_ready_at` が記録されなければ、初回処理へ到達できなかった起動失敗として tmux セッションを終了し、crashed として記録する。done マーカー (`checkpoint_done_at`) 付きの tmux セッションは終了して掃除する。作業予算超過なら kick し、kick 後 5 分の猶予を過ぎても生きていれば tmux セッションを終了して `last_result=killed` を記録する
   3. 周期起動: due (前回起動から interval_min 経過 && enabled && active_hours 内
      && lock なし) のプロジェクト、および restart 予約のあるプロジェクトを launch
 - `chima launch <project>` —
@@ -196,6 +192,7 @@ chima は人間の API key ではなく、Linear の OAuth Application を actor
   `$worker-run <project>` を初期指示として対話起動し、lock を記録する。
   CHIMA_PROJECT は worker の子プロセスである hook / statusline にも継承されるので、
   これが「ワーカーセッションかどうか」の判定フラグになる
+- `chima session ready <project>` — worker-run の最初の操作として呼び、初回処理へ到達できた時刻を `worker_ready_at` に記録する。起動後 2 分以内に記録されなければ、次の tick が起動失敗として処理する
 - `chima kick <project> [--reason <text>]` — tmux send-keys で実行中セッションに
   収束指示メッセージを送る。文面: 「収束指示: <reason>。新規作業を止めて worker-run
   の収束プロトコルを今すぐ実行して終了してください」。state に wrapup_requested_at
