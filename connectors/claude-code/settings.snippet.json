@@ -1,4 +1,8 @@
 {
+  "statusLine": {
+    "type": "command",
+    "command": "/path/to/chima/connectors/claude-code/statusline-wrapper.sh"
+  },
   "hooks": {
     "PostToolUse": [
       {

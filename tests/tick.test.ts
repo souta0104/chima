@@ -87,7 +87,10 @@ describe("lock 判定", () => {
     expect(
       decideLockAction(
         projectConfig(),
-        { lock: lock(minutesBefore(21)) },
+        {
+          lock: lock(minutesBefore(21)),
+          worker_ready_at: minutesBefore(20),
+        },
         true,
         NOW,
       ),
@@ -100,12 +103,24 @@ describe("lock 判定", () => {
         projectConfig(),
         {
           lock: lock(minutesBefore(21)),
+          worker_ready_at: minutesBefore(20),
           wrapup_requested_at: minutesBefore(5),
         },
         true,
         NOW,
       ),
     ).toEqual({ type: "killed" });
+  });
+
+  it("起動から2分以内に ready が記録されなければ startup-failed", () => {
+    expect(
+      decideLockAction(
+        projectConfig(),
+        { lock: lock(minutesBefore(2)), worker_ready_at: null },
+        true,
+        NOW,
+      ),
+    ).toEqual({ type: "startup-failed" });
   });
 });
 
@@ -234,6 +249,7 @@ describe("tick", () => {
     const home = await makeHome({
       last_run: NOW.toISOString(),
       lock: lock(minutesBefore(21)),
+      worker_ready_at: minutesBefore(20),
     });
     const dependencies = mockDependencies(true);
 
@@ -246,6 +262,7 @@ describe("tick", () => {
     const home = await makeHome({
       last_run: NOW.toISOString(),
       lock: lock(minutesBefore(21)),
+      worker_ready_at: minutesBefore(20),
       wrapup_requested_at: minutesBefore(5),
     });
     const dependencies = mockDependencies(true);
@@ -256,6 +273,33 @@ describe("tick", () => {
     await expect(readState(home)).resolves.toMatchObject({
       lock: null,
       last_result: "killed",
+    });
+  });
+
+  it("ready が記録されない tmux セッションを kill して crashed とする", async () => {
+    const home = await makeHome({
+      last_run: NOW.toISOString(),
+      lock: lock(minutesBefore(2)),
+      worker_ready_at: null,
+    });
+    const dependencies = mockDependencies(true);
+
+    await tick(env(home), dependencies);
+
+    expect(dependencies.tmux.killSession).toHaveBeenCalledWith("chima-magonote");
+    expect(dependencies.logStage).toHaveBeenCalledWith(
+      "lock-check.startup-failed",
+      "magonote",
+      "start",
+    );
+    expect(dependencies.logStage).toHaveBeenCalledWith(
+      "lock-check.startup-failed",
+      "magonote",
+      "done",
+    );
+    await expect(readState(home)).resolves.toMatchObject({
+      lock: null,
+      last_result: "crashed",
     });
   });
 
@@ -538,6 +582,7 @@ describe("tick", () => {
     const home = await makeHome({
       last_run: NOW.toISOString(),
       lock: lock(minutesBefore(21)),
+      worker_ready_at: minutesBefore(20),
     });
     const dependencies = mockDependencies(true);
 

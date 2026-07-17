@@ -18,23 +18,24 @@ description: chima のワーカーセッションの行動規範。`/worker-run 
 
 セッション開始直後に、以下を順に行う。
 
-1. `chima status --json` を実行し、自分の lock 状態・直近実行結果を確認する
-2. `~/.chima/config/projects.json` から `<project>` のエントリを読み、
+1. 他の操作より先に `chima session ready <project>` を実行し、ワーカーが起動できたことを記録する。この記録がない場合、chima は起動失敗として tmux セッションを終了する
+2. `chima status --json` を実行し、自分の lock 状態・直近実行結果を確認する
+3. `~/.chima/config/projects.json` から `<project>` のエントリを読み、
    `work_budget_min` / `context_threshold_pct` / `policy.ai_should_try` /
    `policy.delegate_to_human` を把握する
-3. `~/.chima/state/pending/<project>.md` が存在すれば、その内容を読み、
+4. `~/.chima/state/pending/<project>.md` が存在すれば、その内容を読み、
    Linear (chima CLI 経由) の親イシューへ最初にコメント投稿する。これは前回
    セッションが Linear 不通で退避したチェックポイントである。投稿できたら
    このファイルは削除する
-4. `chima status --json` の `last_result` が `crashed` または `killed` であれば、
+5. `chima status --json` の `last_result` が `crashed` または `killed` であれば、
    「前回セッションは異常終了した」旨を親イシューにコメントする。続けて
    `git status` / `git log` / `git diff` で branch の状態と未 push の差分を確認し、
    直近のチェックポイントコメントと突き合わせて状況を再構築する
-5. Linear (chima CLI 経由) から取得する:
+6. Linear (chima CLI 経由) から取得する:
    - 親イシューの description
    - 全サブイシューの状態・blocker・assignee
    - 前回チェックポイント以降に投稿された人間コメント (author が chima 以外)
-6. GitHub (`gh`) から取得する: 関連 PR の新規レビューコメント
+7. GitHub (`gh`) から取得する: 関連 PR の新規レビューコメント
 
 ## 2. タスク選択
 

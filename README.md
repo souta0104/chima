@@ -26,11 +26,32 @@ worker-run skill  → ワーカーの行動規範 (Linear 運用プロトコル 
 
 ## セットアップ
 
-`install.sh` (bin の symlink 配置、`~/.chima` 初期化、launchd 登録、
-`settings.json` への hooks/statusline 追記ガイド表示) は未実装。DEV-16 で追加予定。
-現時点で手動セットアップする場合は、`docs/design.md` の「リポジトリ構成」
-「state / 設定」節を参照して `~/.chima/config/projects.json` 等を直接用意する
-必要がある。
+最初に依存関係を導入してビルドする。
+
+```sh
+pnpm install
+pnpm build
+```
+
+次に chima CLI と `worker-run` skill を配置する。
+
+```sh
+./install.sh
+```
+
+Claude Code の `PostToolUse` / `Stop` hook と statusline 連携を追加する場合は、次のオプションを指定する。既存の hook と statusline は保持される。
+
+```sh
+./install.sh --enable-claude-code
+```
+
+`~/.chima/config/projects.json` に有効なプロジェクトを登録した後、launchd の定期実行を有効化する。
+
+```sh
+./install.sh --enable-launchd
+```
+
+両方のオプションは同時に指定できる。
 
 ## 開発コマンド
 

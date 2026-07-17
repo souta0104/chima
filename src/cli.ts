@@ -3,7 +3,7 @@ import { guard, stopGate } from "./commands/guard.js";
 import { kickProject } from "./commands/kick.js";
 import { launchProject } from "./commands/launch.js";
 import { runLinearCommand } from "./commands/linear.js";
-import { recordSession } from "./commands/session.js";
+import { markWorkerReady, recordSession } from "./commands/session.js";
 import { formatStatusText, getStatus } from "./commands/status.js";
 import { tick } from "./commands/tick.js";
 
@@ -114,6 +114,15 @@ export async function runCli(
     }
     io.writeStdout(await recordSession(input, env));
     return 0;
+  }
+
+  if (
+    command === "session" &&
+    argv[3] === "ready" &&
+    argv[4] !== undefined &&
+    argv.length === 5
+  ) {
+    return runCommand(() => markWorkerReady(argv[4]!, env), io);
   }
 
   if (

@@ -57,6 +57,7 @@ describe("launchProject", () => {
         tmux_session: "chima-magonote",
         started_at: "2026-07-12T01:00:00.000Z",
       },
+      worker_ready_at: null,
       wrapup_requested_at: null,
       checkpoint_done_at: null,
     });
