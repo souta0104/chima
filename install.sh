@@ -10,6 +10,7 @@ LAUNCH_AGENTS="${HOME}/Library/LaunchAgents"
 PLIST="${LAUNCH_AGENTS}/com.chima.tick.plist"
 CODEX_HOME="${CODEX_HOME:-${HOME}/.codex}"
 WORKER_SKILL="${REPO_DIR}/connectors/common/skills/worker-run"
+OLD_WORKER_SKILL="${REPO_DIR}/connectors/claude-code/skills/worker-run"
 CLAUDE_HOME="${HOME}/.claude"
 CLAUDE_SKILLS="${CLAUDE_HOME}/skills"
 WORKER_SKILL_LINK="${CLAUDE_SKILLS}/worker-run"
@@ -63,6 +64,9 @@ node "${REPO_DIR}/scripts/install-codex-hooks.mjs" \
 if [[ -L "${WORKER_SKILL_LINK}" && -e "${WORKER_SKILL_LINK}" && \
   "${WORKER_SKILL_LINK}" -ef "${WORKER_SKILL}" ]]; then
   :
+elif [[ -L "${WORKER_SKILL_LINK}" && \
+  "$(readlink "${WORKER_SKILL_LINK}")" == "${OLD_WORKER_SKILL}" ]]; then
+  ln -sfn "${WORKER_SKILL}" "${WORKER_SKILL_LINK}"
 elif [[ -e "${WORKER_SKILL_LINK}" || -L "${WORKER_SKILL_LINK}" ]]; then
   printf '%s は本リポジトリの worker-run skill への symlink ではないため、上書きしません。\n' \
     "${WORKER_SKILL_LINK}" >&2

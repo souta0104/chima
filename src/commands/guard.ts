@@ -114,7 +114,7 @@ export async function stopGate(
     }
 
     const paths = getChimaPaths(env);
-    const config = await readJsonFile<ProjectsConfig>(
+    const config = await readProjectsConfigSafely(
       join(paths.config, "projects.json"),
     );
     const project = findProject(config, projectName);
@@ -250,6 +250,16 @@ async function readProjectStateSafely(
   try {
     const state = await readJsonFile<unknown>(path);
     return isRecord(state) ? state : null;
+  } catch {
+    return null;
+  }
+}
+
+async function readProjectsConfigSafely(
+  path: string,
+): Promise<ProjectsConfig | null> {
+  try {
+    return await readJsonFile<ProjectsConfig>(path);
   } catch {
     return null;
   }

@@ -276,6 +276,26 @@ describe("guard --stop-gate", () => {
 
     await expect(stopGate(hookInput(), env(home))).resolves.toBe("");
   });
+
+  it("projects.json が壊れていてもチェックポイント保護は機能する", async () => {
+    const home = await makeGuardHome();
+    await writeFile(
+      join(home, "config", "projects.json"),
+      "not valid json",
+      "utf8",
+    );
+    await writeProjectState(home, {
+      wrapup_requested_at: "2026-07-11T00:00:00.000Z",
+    });
+
+    const output = await stopGate(
+      hookInput(),
+      env(home),
+      at("2026-07-11T00:01:00.000Z"),
+    );
+
+    expect(JSON.parse(output).decision).toBe("block");
+  });
 });
 
 async function makeGuardHome(worker?: Record<string, unknown>): Promise<string> {

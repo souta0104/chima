@@ -127,7 +127,8 @@ function latestSession(
     return null;
   }
 
-  const { project: _project, ...publicSession } = session;
+  const { project: _project, transcript_offset: _transcriptOffset, ...publicSession } =
+    session;
   return publicSession;
 }
 

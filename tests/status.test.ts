@@ -68,6 +68,7 @@ describe("status --json", () => {
       duration_ms: 2000,
       updated_at: "2026-07-11T00:02:00.000Z",
       project: "alpha",
+      transcript_offset: 4096,
     });
 
     await expect(getStatus({ CHIMA_HOME: home })).resolves.toEqual({

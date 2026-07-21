@@ -49,7 +49,15 @@ export async function readProjectsConfig(
     return [];
   }
 
-  return config.projects.filter(isProjectConfig);
+  return config.projects.map((candidate, index) => {
+    if (isProjectConfig(candidate)) {
+      return candidate;
+    }
+    throw new Error(
+      `projects.json のプロジェクト設定が不正です (${projectLabel(candidate, index)})。` +
+        "worker フィールド (runtime/model に加えて claude-code なら planner_model、codex なら reasoning_effort) を設定してください。",
+    );
+  });
 }
 
 export async function findProjectConfig(
@@ -60,16 +68,28 @@ export async function findProjectConfig(
   const config = await readJsonFile<ProjectsConfig>(
     join(paths.config, "projects.json"),
   );
-  const project = Array.isArray(config?.projects)
+  const candidate = Array.isArray(config?.projects)
     ? config.projects.find(
-        (candidate): candidate is LaunchProjectConfig =>
-          isLaunchProjectConfig(candidate) && candidate.name === name,
+        (entry): entry is Record<string, unknown> =>
+          isRecord(entry) && entry.name === name,
       )
     : undefined;
-  if (project === undefined) {
+  if (candidate === undefined) {
     throw new Error(`プロジェクト設定がありません: ${name}`);
   }
-  return project;
+  if (!isLaunchProjectConfig(candidate)) {
+    throw new Error(
+      `projects.json のプロジェクト設定が不正です (${name})。` +
+        "worker フィールド (runtime/model に加えて claude-code なら planner_model、codex なら reasoning_effort) を設定してください。",
+    );
+  }
+  return candidate;
+}
+
+function projectLabel(value: unknown, index: number): string {
+  return isRecord(value) && typeof value.name === "string"
+    ? value.name
+    : `index ${index}`;
 }
 
 function isLaunchProjectConfig(value: unknown): value is LaunchProjectConfig {
