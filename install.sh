@@ -81,15 +81,15 @@ if [[ "${ENABLE_LAUNCHD}" == true ]]; then
     exit 1
   fi
 
-  if [[ ! -f "${REPO_DIR}/dist/cli.js" ]]; then
-    printf 'dist/cli.js が見つかりません。先に pnpm build を実行してください。\n' >&2
+  if [[ ! -f "${REPO_DIR}/dist/cli.js" || ! -f "${REPO_DIR}/dist/tick-watchdog.js" ]]; then
+    printf 'dist/cli.js または dist/tick-watchdog.js が見つかりません。先に pnpm build を実行してください。\n' >&2
     exit 1
   fi
 
   mkdir -p "${LAUNCH_AGENTS}"
 
   ESCAPED_NODE="$(xml_escape "${NODE_BIN}")"
-  ESCAPED_CLI="$(xml_escape "${REPO_DIR}/dist/cli.js")"
+  ESCAPED_WATCHDOG="$(xml_escape "${REPO_DIR}/dist/tick-watchdog.js")"
   ESCAPED_REPO="$(xml_escape "${REPO_DIR}")"
   ESCAPED_HOME="$(xml_escape "${CHIMA_HOME}")"
   ESCAPED_PATH="$(xml_escape "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:${LOCAL_BIN}")"
@@ -105,8 +105,7 @@ if [[ "${ENABLE_LAUNCHD}" == true ]]; then
   <key>ProgramArguments</key>
   <array>
     <string>${ESCAPED_NODE}</string>
-    <string>${ESCAPED_CLI}</string>
-    <string>tick</string>
+    <string>${ESCAPED_WATCHDOG}</string>
   </array>
   <key>WorkingDirectory</key>
   <string>${ESCAPED_REPO}</string>

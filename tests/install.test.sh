@@ -19,7 +19,7 @@ fail() {
 run_install() {
   local home="$1"
   shift
-  HOME="${home}" PATH="${TEST_ROOT}/bin:${ORIGINAL_PATH}" \
+  env -u CHIMA_HOME HOME="${home}" PATH="${TEST_ROOT}/bin:${ORIGINAL_PATH}" \
     bash "${REPO_DIR}/install.sh" "$@"
 }
 
@@ -109,5 +109,11 @@ plist="${enabled_home}/Library/LaunchAgents/com.chima.tick.plist"
 [[ "$(plutil -extract EnvironmentVariables.PATH raw "${plist}")" == \
   "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:${enabled_home}/.local/bin" ]] || \
   fail 'launchd の PATH が固定値になっていない'
+[[ "$(plutil -extract ProgramArguments.1 raw "${plist}")" == \
+  "${REPO_DIR}/dist/tick-watchdog.js" ]] || \
+  fail 'launchd が外部 tick watchdog を起動していない'
+program_arguments="$(plutil -extract ProgramArguments json -o - "${plist}")"
+[[ "$(jq 'length' <<<"${program_arguments}")" == '2' ]] || \
+  fail 'launchd の ProgramArguments が node と watchdog 以外を含んでいる'
 
 printf 'PASS: install.sh の通常実行・Claude Code 連携・launchd 有効化\n'

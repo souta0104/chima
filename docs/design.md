@@ -83,7 +83,7 @@ Claude Code のセッションはコンテキストが 40% を超えたあたり
 tmux のみで、部品同士の直接依存はない。
 
 ```
-launchd(2分毎) → chima tick ─┬─ 緊急検知: 人間の [今すぐ確認] コメント → chima kick → 再起動
+launchd(2分毎) → 外部 watchdog → chima tick ─┬─ 緊急検知: 人間の [今すぐ確認] コメント → chima kick → 再起動
                              └─ 周期判定: due なプロジェクト → chima launch (tmux で claude 起動)
 statusline ラッパー → chima session record   (使用率/経過時間を state へ。JSON はパススルー)
 PostToolUse hook  → chima guard              (state を読み、閾値超過なら additionalContext 注入)
@@ -175,7 +175,10 @@ chima は人間の API key ではなく、Linear の OAuth Application を actor
 
 ## `chima` サブコマンド仕様
 
-- `chima tick` — 唯一の launchd エントリ (2 分毎)。処理順:
+- 外部 tick watchdog — launchd から 2 分毎に起動する軽量な親プロセス。
+  `chima tick` を子プロセスとして起動し、モジュール読込中を含めて 90 秒以内に
+  終了しなければ子プロセスグループを終了する
+- `chima tick` — 外部 watchdog の子プロセスとして実行する。処理順:
   1. 緊急検知: 各 enabled プロジェクトについて、last_seen_comment_at 以降の
      Linear コメント (親イシュー + 全サブイシュー、author が chima 以外) と、
      関連 PR の新規レビューコメント (`gh api`) を取得。`[今すぐ確認]` を含むものが
@@ -373,7 +376,8 @@ Linear が不通なら、チェックポイント本文を state/pending/<name>.
 
 ## 過剰回避の決定 (シンプルさのために削ったもの)
 
-- launchd ジョブは 1 本だけ (`chima tick` が緊急検知と周期起動を兼ねる)。
+- launchd ジョブは 1 本だけ (外部 watchdog が `chima tick` を起動し、
+  `chima tick` が緊急検知と周期起動を兼ねる)。
   dispatcher / urgent-poller を別プロセスに分けない
 - ランタイム依存ゼロ。Linear SDK・cron ライブラリ・DB を入れない。state は JSON
   ファイル、スケジュール判定は tick 内の時刻比較のみ

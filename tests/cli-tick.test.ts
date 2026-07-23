@@ -12,43 +12,6 @@ describe("tick / launch / kick CLI", () => {
     expect(commands.tick).toHaveBeenCalledOnce();
   });
 
-  it("tick が 90 秒以内に終われば watchdog は発火しない", async () => {
-    vi.useFakeTimers();
-    try {
-      const cliIo = io();
-      const commands = mockCommands();
-      commands.tick.mockImplementation(async () => {
-        vi.advanceTimersByTime(1_000);
-      });
-
-      await expect(
-        runCli(["node", "chima", "tick"], {}, cliIo, commands),
-      ).resolves.toBe(0);
-      expect(cliIo.exit).not.toHaveBeenCalled();
-    } finally {
-      vi.useRealTimers();
-    }
-  });
-
-  it("tick が 90 秒を超えてハングしたら watchdog が exit(1) を呼ぶ", async () => {
-    vi.useFakeTimers();
-    try {
-      const cliIo = io();
-      const commands = mockCommands();
-      commands.tick.mockImplementation(() => new Promise(() => undefined));
-
-      const resultPromise = runCli(["node", "chima", "tick"], {}, cliIo, commands);
-      await vi.advanceTimersByTimeAsync(90_000);
-      await expect(resultPromise).resolves.toBe(1);
-      expect(cliIo.exit).toHaveBeenCalledWith(1);
-      expect(cliIo.writeStderr).toHaveBeenCalledWith(
-        expect.stringContaining("watchdog timeout"),
-      );
-    } finally {
-      vi.useRealTimers();
-    }
-  });
-
   it("launch に project を渡す", async () => {
     const commands = mockCommands();
 
@@ -86,6 +49,5 @@ function io() {
     stdin: Readable.from([]),
     writeStdout: vi.fn(),
     writeStderr: vi.fn(),
-    exit: vi.fn(),
   };
 }
