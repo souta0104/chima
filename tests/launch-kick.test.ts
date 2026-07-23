@@ -62,6 +62,40 @@ describe("launchProject", () => {
       checkpoint_done_at: null,
     });
   });
+
+  it("Codex を Git 操作可能、承認なしで起動する", async () => {
+    const home = await makeHome({
+      runtime: "codex",
+      model: "gpt-5.6-sol",
+      reasoning_effort: "medium",
+    });
+    const tmux = mockTmux();
+
+    await launchProject("magonote", env(home), at("2026-07-12T01:00:00.000Z"), tmux);
+
+    expect(tmux.newSession).toHaveBeenCalledWith(
+      "chima-magonote",
+      "/repo/magonote",
+      "codex",
+      [
+        "--sandbox",
+        "danger-full-access",
+        "--ask-for-approval",
+        "never",
+        "--add-dir",
+        home,
+        "--model",
+        "gpt-5.6-sol",
+        "--config",
+        'model_reasoning_effort="medium"',
+        "$worker-run magonote",
+      ],
+      expect.objectContaining({
+        CHIMA_HOME: home,
+        CHIMA_PROJECT: "magonote",
+      }),
+    );
+  });
 });
 
 describe("kickProject", () => {
@@ -96,18 +130,24 @@ describe("kickProject", () => {
   });
 });
 
-async function makeHome(): Promise<string> {
+async function makeHome(
+  worker: Record<string, unknown> = {
+    runtime: "claude-code",
+    model: "claude-sonnet-5",
+    planner_model: "claude-fable-5",
+  },
+): Promise<string> {
   const home = await mkdtemp(join(tmpdir(), "chima-launch-kick-test-"));
   temporaryDirectories.push(home);
   await mkdir(join(home, "config"), { recursive: true });
   await mkdir(join(home, "state", "projects"), { recursive: true });
   await writeJson(join(home, "config", "projects.json"), {
-    projects: [projectConfig()],
+    projects: [projectConfig(worker)],
   });
   return home;
 }
 
-function projectConfig(): Record<string, unknown> {
+function projectConfig(worker: Record<string, unknown>): Record<string, unknown> {
   return {
     name: "magonote",
     repo: "/repo/magonote",
@@ -115,7 +155,7 @@ function projectConfig(): Record<string, unknown> {
     interval_min: 30,
     work_budget_min: 20,
     active_hours: "09-24",
-    orchestrator_model: "claude-sonnet-5",
+    worker,
     enabled: true,
   };
 }

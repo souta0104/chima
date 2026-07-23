@@ -8,7 +8,9 @@ LOCAL_BIN="${HOME}/.local/bin"
 CHIMA_HOME="${CHIMA_HOME:-${HOME}/.chima}"
 LAUNCH_AGENTS="${HOME}/Library/LaunchAgents"
 PLIST="${LAUNCH_AGENTS}/com.chima.tick.plist"
-WORKER_SKILL="${REPO_DIR}/connectors/claude-code/skills/worker-run"
+CODEX_HOME="${CODEX_HOME:-${HOME}/.codex}"
+WORKER_SKILL="${REPO_DIR}/connectors/common/skills/worker-run"
+OLD_WORKER_SKILL="${REPO_DIR}/connectors/claude-code/skills/worker-run"
 CLAUDE_HOME="${HOME}/.claude"
 CLAUDE_SKILLS="${CLAUDE_HOME}/skills"
 WORKER_SKILL_LINK="${CLAUDE_SKILLS}/worker-run"
@@ -46,13 +48,25 @@ mkdir -p \
   "${CHIMA_HOME}/state/projects" \
   "${CHIMA_HOME}/state/pending" \
   "${CHIMA_HOME}/logs" \
+  "${CODEX_HOME}/skills/worker-run" \
   "${CLAUDE_SKILLS}"
 
 ln -sfn "${CHIMA_BIN}" "${LOCAL_BIN}/chima"
+cp "${REPO_DIR}/connectors/common/skills/worker-run/SKILL.md" \
+  "${CODEX_HOME}/skills/worker-run/SKILL.md"
+chmod +x \
+  "${REPO_DIR}/connectors/codex/hooks/context-guard.sh" \
+  "${REPO_DIR}/connectors/codex/hooks/stop-gate.sh"
+node "${REPO_DIR}/scripts/install-codex-hooks.mjs" \
+  "${CODEX_HOME}/hooks.json" \
+  "${REPO_DIR}/connectors/codex"
 
 if [[ -L "${WORKER_SKILL_LINK}" && -e "${WORKER_SKILL_LINK}" && \
   "${WORKER_SKILL_LINK}" -ef "${WORKER_SKILL}" ]]; then
   :
+elif [[ -L "${WORKER_SKILL_LINK}" && \
+  "$(readlink "${WORKER_SKILL_LINK}")" == "${OLD_WORKER_SKILL}" ]]; then
+  ln -sfn "${WORKER_SKILL}" "${WORKER_SKILL_LINK}"
 elif [[ -e "${WORKER_SKILL_LINK}" || -L "${WORKER_SKILL_LINK}" ]]; then
   printf '%s は本リポジトリの worker-run skill への symlink ではないため、上書きしません。\n' \
     "${WORKER_SKILL_LINK}" >&2
@@ -133,6 +147,10 @@ fi
 
 printf 'chima を %s に配置しました。\n' "${LOCAL_BIN}/chima"
 printf '%s が PATH にない場合は、シェル設定へ追加してください。\n' "${LOCAL_BIN}"
+printf 'worker-run skill を Claude Code と Codex に配置しました。\n'
+printf 'Codex hooks を既存の %s を保持して追加しました。\n' \
+  "${CODEX_HOME}/hooks.json"
+printf 'Codex の /hooks で追加した hook を確認し、信頼してください。\n'
 
 if [[ "${ENABLE_CLAUDE_CODE}" == true ]]; then
   printf 'Claude Code の hooks と statusline を有効化しました。\n'

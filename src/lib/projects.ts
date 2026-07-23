@@ -9,8 +9,22 @@ export interface ProjectConfig {
   interval_min: number;
   work_budget_min: number;
   active_hours: string;
-  orchestrator_model: string;
+  worker: WorkerConfig;
   enabled: boolean;
+}
+
+export type WorkerConfig = ClaudeCodeWorkerConfig | CodexWorkerConfig;
+
+export interface ClaudeCodeWorkerConfig {
+  runtime: "claude-code";
+  model: string;
+  planner_model: string;
+}
+
+export interface CodexWorkerConfig {
+  runtime: "codex";
+  model: string;
+  reasoning_effort: "minimal" | "low" | "medium" | "high" | "xhigh";
 }
 
 interface ProjectsConfig {
@@ -20,7 +34,7 @@ interface ProjectsConfig {
 export interface LaunchProjectConfig {
   name: string;
   repo: string;
-  orchestrator_model: string;
+  worker: WorkerConfig;
 }
 
 export async function readProjectsConfig(
@@ -35,7 +49,15 @@ export async function readProjectsConfig(
     return [];
   }
 
-  return config.projects.filter(isProjectConfig);
+  return config.projects.map((candidate, index) => {
+    if (isProjectConfig(candidate)) {
+      return candidate;
+    }
+    throw new Error(
+      `projects.json のプロジェクト設定が不正です (${projectLabel(candidate, index)})。` +
+        "worker フィールド (runtime/model に加えて claude-code なら planner_model、codex なら reasoning_effort) を設定してください。",
+    );
+  });
 }
 
 export async function findProjectConfig(
@@ -46,16 +68,28 @@ export async function findProjectConfig(
   const config = await readJsonFile<ProjectsConfig>(
     join(paths.config, "projects.json"),
   );
-  const project = Array.isArray(config?.projects)
+  const candidate = Array.isArray(config?.projects)
     ? config.projects.find(
-        (candidate): candidate is LaunchProjectConfig =>
-          isLaunchProjectConfig(candidate) && candidate.name === name,
+        (entry): entry is Record<string, unknown> =>
+          isRecord(entry) && entry.name === name,
       )
     : undefined;
-  if (project === undefined) {
+  if (candidate === undefined) {
     throw new Error(`プロジェクト設定がありません: ${name}`);
   }
-  return project;
+  if (!isLaunchProjectConfig(candidate)) {
+    throw new Error(
+      `projects.json のプロジェクト設定が不正です (${name})。` +
+        "worker フィールド (runtime/model に加えて claude-code なら planner_model、codex なら reasoning_effort) を設定してください。",
+    );
+  }
+  return candidate;
+}
+
+function projectLabel(value: unknown, index: number): string {
+  return isRecord(value) && typeof value.name === "string"
+    ? value.name
+    : `index ${index}`;
 }
 
 function isLaunchProjectConfig(value: unknown): value is LaunchProjectConfig {
@@ -63,7 +97,7 @@ function isLaunchProjectConfig(value: unknown): value is LaunchProjectConfig {
     isRecord(value) &&
     typeof value.name === "string" &&
     typeof value.repo === "string" &&
-    typeof value.orchestrator_model === "string"
+    isWorkerConfig(value.worker)
   );
 }
 
@@ -79,8 +113,26 @@ function isProjectConfig(value: unknown): value is ProjectConfig {
     isFiniteNumber(value.interval_min) &&
     isFiniteNumber(value.work_budget_min) &&
     typeof value.active_hours === "string" &&
-    typeof value.orchestrator_model === "string" &&
+    isWorkerConfig(value.worker) &&
     typeof value.enabled === "boolean"
+  );
+}
+
+function isWorkerConfig(value: unknown): value is WorkerConfig {
+  if (!isRecord(value) || typeof value.model !== "string") {
+    return false;
+  }
+
+  if (value.runtime === "claude-code") {
+    return typeof value.planner_model === "string";
+  }
+
+  return (
+    value.runtime === "codex" &&
+    typeof value.reasoning_effort === "string" &&
+    ["minimal", "low", "medium", "high", "xhigh"].includes(
+      value.reasoning_effort,
+    )
   );
 }
 

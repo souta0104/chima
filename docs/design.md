@@ -2,7 +2,7 @@
 
 ## Context (なぜ作るか)
 
-Claude Code のセッションはコンテキストが 40% を超えたあたりから品質が落ちる。
+Claude Code や Codex のセッションはコンテキスト使用率が上がると品質が落ちる。
 現状ユーザーは Linear イシューに手動で進捗ログを書き、セッションを作り直す運用を
 している。これを自動化する。目指す状態:
 
@@ -15,7 +15,7 @@ Claude Code のセッションはコンテキストが 40% を超えたあたり
 
 ## 確定事項 (全決定の記録)
 
-1. 実行環境: ローカル Mac で「対話型」の `claude` セッションを tmux 起動する。
+1. 実行環境: ローカル Mac で「対話型」の Claude Code または Codex を tmux 起動する。
    subscription plan のまま使うため headless API ではなく対話型。実行システム自体は
    原始的な仕組みでよい (launchd + tmux + シェル起動)
 2. タスク源: プロジェクトごとに Linear 親イシューを固定指定。ワーカーはその配下の
@@ -32,12 +32,16 @@ Claude Code のセッションはコンテキストが 40% を超えたあたり
 5. アーキテクチャ: 疎結合 5 コンポーネント (tracker / guard / dispatcher /
    urgent poller / worker skill)。ただし後述の通りコアを CLI 1 本に集約
 6. 置き場所: 専用の新規リポジトリ
-7. 権限モード: auto (現在の defaultMode と同じ)。無人で承認プロンプトに当たったら
-   そこで止まらず、「承認待ちで進めなかった」ことを Linear に記録して人間に依頼する
+7. Claude Code の権限モードは auto。Codex は danger-full-access、承認なしで起動する。
+   workspace-write では `.git` が読み取り専用になり、ワーカーに必要なブランチ作成、
+   commit、push を実行できないため、リポジトリと `CHIMA_HOME` へ書き込める権限を与える。
+   承認プロンプトに当たったらそこで止まらず、「承認待ちで進めなかった」ことを
+   Linear に記録して人間に依頼する
 8. モデル役割分担: 毎サイクル「plan/strategizing (fable) → work (sonnet5 指揮)」。
    詳細は worker-run skill 節
-9. コアは AI ツール非依存の単一 CLI (名前: chima)。Claude Code 側は hook / statusline
-   / skill の薄いコネクタのみ。将来 web console で可視化しやすい素の JSON state
+9. コアは AI ツール非依存の単一 CLI (名前: chima)。各 runtime 側は hook / statusline
+   / skill / transcript adapter の薄いコネクタのみ。将来 web console で
+   可視化しやすい素の JSON state
 10. TypeScript + pnpm。実装は agent-orchestrator skill を積極活用して進める
 11. 仕組み・実装ともに過剰にしない (削った点は「過剰回避の決定」節に明記)
 12. 人間がやるべきこと / AI が頑張ることをプロジェクトごとに明示設定できる
@@ -58,11 +62,10 @@ Claude Code のセッションはコンテキストが 40% を超えたあたり
   → 使用量検知の一次情報源は statusline。これが最も正確で公式な入口。
     ただし chima の成立条件にはせず、statusline 未導入環境では時間ベース判定
     のみで動作する
-- hook (PreToolUse / PostToolUse / Stop / SessionStart 等) の stdin には context
-  使用量は入らない (docs/en/hooks.md)。session_id と transcript_path は入る。
-  transcript JSONL のパースは「バージョン間で形式が変わる」と明記された非公式手段
-  なので採用しない
-  → hook は自力で使用量を知れないため、statusline が書いた state ファイルを読む
+- Codex hook の stdin には `session_id` と `transcript_path` が入る。transcript は
+  安定した interface ではないため、Codex adapter に形式依存を閉じ込める。
+  `event_msg.payload.type == "token_count"` の最新行だけを使い、形式変更時は
+  `unsupported` として時間判定へ退避する
 - PostToolUse hook は stdout JSON の
   `hookSpecificOutput.additionalContext` でセッション中の Claude に文脈を注入できる
   → 「40% 超えたから収束せよ」の注入経路
@@ -84,8 +87,9 @@ tmux のみで、部品同士の直接依存はない。
 
 ```
 launchd(2分毎) → chima tick ─┬─ 緊急検知: 人間の [今すぐ確認] コメント → chima kick → 再起動
-                             └─ 周期判定: due なプロジェクト → chima launch (tmux で claude 起動)
+                             └─ 周期判定: due なプロジェクト → chima launch (tmux で worker 起動)
 statusline ラッパー → chima session record   (使用率/経過時間を state へ。JSON はパススルー)
+Codex hook         → Codex transcript adapter (token_count を増分取得して state へ記録)
 PostToolUse hook  → chima guard              (state を読み、閾値超過なら additionalContext 注入)
 Stop hook         → chima guard --stop-gate  (チェックポイント未記録の停止を 1 回だけブロック)
 worker-run skill  → ワーカーの行動規範 (Linear 運用プロトコル + モデルルーティング)
@@ -186,9 +190,9 @@ chima は人間の API key ではなく、Linear の OAuth Application を actor
      && lock なし) のプロジェクト、および restart 予約のあるプロジェクトを launch
 - `chima launch <project>` —
   `tmux new-session -d -s chima-<project> -c <repo>` で
-  `CHIMA_PROJECT=<name> claude --permission-mode auto --model <orchestrator_model>
-  "/worker-run <project>"` を起動し、lock (tmux セッション名 + started_at) を記録。
-  CHIMA_PROJECT は claude の子プロセスである hook / statusline にも継承されるので、
+  runtime adapter が Claude Code では `/worker-run <project>`、Codex では
+  `$worker-run <project>` を初期指示として対話起動し、lock を記録する。
+  CHIMA_PROJECT は worker の子プロセスである hook / statusline にも継承されるので、
   これが「ワーカーセッションかどうか」の判定フラグになる
 - `chima session ready <project>` — worker-run の最初の操作として呼び、初回処理へ到達できた時刻を `worker_ready_at` に記録する。起動後 2 分以内に記録されなければ、次の tick が起動失敗として処理する
 - `chima kick <project> [--reason <text>]` — tmux send-keys で実行中セッションに
@@ -232,8 +236,11 @@ chima は人間の API key ではなく、Linear の OAuth Application を actor
     "work_budget_min": 20,
     "context_threshold_pct": 40,
     "active_hours": "09-24",
-    "orchestrator_model": "claude-sonnet-5",
-    "planner_model": "claude-fable-5",
+    "worker": {
+      "runtime": "claude-code",
+      "model": "claude-sonnet-5",
+      "planner_model": "claude-fable-5"
+    },
     "enabled": true,
     "policy": {
       "ai_should_try": [
@@ -255,7 +262,8 @@ chima は人間の API key ではなく、Linear の OAuth Application を actor
 
 ## worker-run skill (ワーカーの行動規範)
 
-connectors/claude-code/skills/worker-run/SKILL.md に定義する。chima の頭脳部分。
+connectors/common/skills/worker-run/SKILL.md に定義し、installer が Claude Code と
+Codex の探索先へ配置する。chima の頭脳部分。
 
 ### 1. 起動ルーチン
 
@@ -379,7 +387,8 @@ Linear が不通なら、チェックポイント本文を state/pending/<name>.
   ファイル、スケジュール判定は tick 内の時刻比較のみ
 - state はプロジェクト毎 1 ファイル + セッション毎 1 ファイルのみ。実行履歴 DB や
   イベントログの作り込みはしない (logs/ のテキストログで足りる)
-- transcript JSONL のパースはしない (非公式で壊れやすい)。使用量は statusline 経由のみ
+- Codex transcript の会話本文や tool output は保存しない。token_count の必要項目だけを
+  増分解析し、形式変更時は時間判定へ退避する
 - 単体テストは判断ロジック (guard の閾値・スロットリング・stop-gate、tick の due
   判定) に絞る。tmux / launchd 連携は手動リハーサルで検証する
 - web console・webhook・親ワーカー並列化・ステータスキュー方式は作らない (将来スコープ)

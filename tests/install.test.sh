@@ -41,6 +41,26 @@ default_output="$(run_install "${default_home}" 2>&1)"
 [[ "${default_output}" == *'launchd は有効化していません。'* ]] || \
   fail 'launchd を有効化していない旨が表示されなかった'
 
+upgrade_home="${TEST_ROOT}/upgrade"
+mkdir -p "${upgrade_home}/.claude/skills"
+ln -s "${REPO_DIR}/connectors/claude-code/skills/worker-run" \
+  "${upgrade_home}/.claude/skills/worker-run"
+run_install "${upgrade_home}" >/dev/null
+[[ "$(readlink "${upgrade_home}/.claude/skills/worker-run")" == \
+  "${REPO_DIR}/connectors/common/skills/worker-run" ]] || \
+  fail '旧バージョンの worker-run symlink が新しい配置先に置き換わらなかった'
+
+foreign_home="${TEST_ROOT}/foreign"
+mkdir -p "${foreign_home}/.claude/skills"
+ln -s "/tmp/not-chima" "${foreign_home}/.claude/skills/worker-run"
+set +e
+foreign_output="$(run_install "${foreign_home}" 2>&1)"
+foreign_status=$?
+set -e
+[[ ${foreign_status} -ne 0 ]] || fail '無関係な symlink を上書きして exit 0 になった'
+[[ "${foreign_output}" == *'上書きしません。'* ]] || \
+  fail '無関係な symlink のエラーメッセージが表示されなかった'
+
 claude_home="${TEST_ROOT}/claude"
 mkdir -p "${claude_home}/.claude"
 cat >"${claude_home}/.claude/settings.json" <<'EOF'
