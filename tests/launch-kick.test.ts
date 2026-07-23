@@ -63,7 +63,7 @@ describe("launchProject", () => {
     });
   });
 
-  it("Codex を workspace-write、承認なし、ネットワーク許可で起動する", async () => {
+  it("Codex を Git 操作可能、承認なしで起動する", async () => {
     const home = await makeHome({
       runtime: "codex",
       model: "gpt-5.6-sol",
@@ -79,7 +79,7 @@ describe("launchProject", () => {
       "codex",
       [
         "--sandbox",
-        "workspace-write",
+        "danger-full-access",
         "--ask-for-approval",
         "never",
         "--add-dir",
@@ -88,8 +88,6 @@ describe("launchProject", () => {
         "gpt-5.6-sol",
         "--config",
         'model_reasoning_effort="medium"',
-        "--config",
-        "sandbox_workspace_write.network_access=true",
         "$worker-run magonote",
       ],
       expect.objectContaining({

@@ -27,7 +27,7 @@ export function buildWorkerCommand(
     command: "codex",
     args: [
       "--sandbox",
-      "workspace-write",
+      "danger-full-access",
       "--ask-for-approval",
       "never",
       "--add-dir",
@@ -36,8 +36,6 @@ export function buildWorkerCommand(
       worker.model,
       "--config",
       `model_reasoning_effort=${JSON.stringify(worker.reasoning_effort)}`,
-      "--config",
-      "sandbox_workspace_write.network_access=true",
       `$worker-run ${project}`,
     ],
   };
